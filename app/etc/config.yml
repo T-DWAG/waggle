@@ -1,0 +1,14 @@
+app:
+  name: "agent-platform"
+server:
+  mode: "debug" # gin的模式: debug, release, test
+  host: "127.0.0.1" # 监听地址和端口
+  port: 8888
+  readTimeout: 10s # 读取超时时间（秒）
+  writeTimeout: 10s # 写入超时时间（秒）
+  cors:
+    -  "*"
+log:
+  level: "info"
+  format: "pretty" # 日志格式: json, pretty, text 生产环境请选择json
+  addSource: true
