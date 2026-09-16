@@ -12,3 +12,30 @@ log:
   level: "info"
   format: "pretty" # 日志格式: json, pretty, text 生产环境请选择json
   addSource: true
+
+
+
+db:
+  postgres:
+    host: "127.0.0.1"
+    port: 15432
+    user: "TDWAG"
+    password: "TDWAG"
+    database: "agent_db"
+    sslMode: "disable"
+    maxIdleConns: 10
+    maxOpenConns: 100
+    pingTimeout: 5s
+  redis:
+    addr: "127.0.0.1:6379"
+jwt:
+  secret: "agent-platform"
+  expire: 7h
+  refresh: 240h
+email:
+  host: "smtp.qq.com"
+  port: 587
+  username: "2636858254@qq.com"
+  password: "zjunfdprdsmwebdb"
+  from: "2636858254@qq.com"
+  baseUrl: "http://127.0.0.1:8888"

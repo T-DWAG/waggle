@@ -4,10 +4,14 @@ import (
 	"app/internal/router"
 
 	"github.com/mszlu521/thunder/config"
+	"github.com/mszlu521/thunder/database"
 	"github.com/mszlu521/thunder/server"
+	"github.com/mszlu521/thunder/tools/jwt"
 )
 
 func Init(s *server.Server, conf *config.Config) {
-	s.RegisterRouters(&router.Event{}, &router.AuthRouter{})
-
+	database.InitPostgres(conf.DB.Postgres)
+	database.InitRedis(conf.DB.Redis)
+	jwt.Init(conf.Jwt.GetSecret())
+	s.RegisterRouters(&router.Event{}, &router.AuthRouter{}, &router.SubscriptionRouter{})
 }

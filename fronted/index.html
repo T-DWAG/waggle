@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>agent-platform · 用户中心</title>
+  <link rel="preload" href="fonts/fusion-pixel-12px-proportional-zh_hans.subset.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/fusion-pixel-12px-monospaced-zh_hans.subset.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script src="api-base.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="win pixel-round">
+
+    <!-- 窗口标题栏 -->
+    <header class="winbar">
+      <div class="winbar-lights" aria-hidden="true">
+        <i class="r"></i><i class="y"></i><i class="g"></i>
+      </div>
+      <span class="winbar-path">t-dwag@agent-platform: <b id="winbarPath">~/login</b></span>
+      <span class="winbar-go">[go]</span>
+    </header>
+
+    <!-- go 命令导航 -->
+    <nav class="gonav" id="gonav" aria-label="主导航">
+      <span class="gonav-prompt" aria-hidden="true">$</span>
+      <button class="gonav-toggle" type="button" aria-expanded="false" aria-controls="gonav-links">导航 ▾</button>
+      <div class="gonav-links" id="gonav-links">
+        <a href="#/login" data-view="login">go /login</a>
+        <a href="#/register" data-view="register">go /register</a>
+        <a href="#/forgot" data-view="forgot">go /forgot</a>
+        <a href="#/console" data-view="console">go /console</a>
+      </div>
+      <span class="gonav-status" id="navStatus"><i class="dot"></i><span id="navStatusText">未登录</span></span>
+    </nav>
+
+    <main>
+      <!-- ==================== 登录 ==================== -->
+      <section class="view is-active" id="view-login">
+        <div class="section">
+          <div class="container">
+            <p class="section-kicker">SIGN IN</p>
+            <h2>登录</h2>
+            <p class="section-intro">
+              用户名或邮箱 + 密码。走 <code>POST /api/v1/auth/login</code>，成功后拿到
+              <code>token</code> 与 <code>refreshToken</code>。
+            </p>
+
+            <div class="auth-grid">
+              <form class="auth-form" id="loginForm" novalidate>
+                <div class="msg" id="loginMsg"></div>
+                <label>用户名 / 邮箱
+                  <input type="text" name="username" placeholder="tdwag 或 you@qq.com" autocomplete="username" required>
+                </label>
+                <label>密码
+                  <input type="password" name="password" placeholder="至少 6 位" autocomplete="current-password" required>
+                </label>
+                <div class="auth-actions">
+                  <button class="pixel-button" type="submit">go login <span>→</span></button>
+                  <span class="quiet"><a href="#/forgot">忘记密码？</a></span>
+                </div>
+              </form>
+
+              <div class="term pixel-round">
+                <div class="term-title">
+                  <div class="winbar-lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+                  <span>t-dwag@agent-platform</span><span class="t-right">auth</span>
+                </div>
+                <div class="term-body">
+                  <p><span class="p">$</span> curl -X POST /api/v1/auth/login</p>
+                  <p class="out">-d '{"username":"tdwag","password":"123456"}'</p>
+                  <p class="dim"># 邮箱未验证会回 1006，先点邮件里的链接</p>
+                  <p><span class="p">$</span> <span class="cursor" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 注册 ==================== -->
+      <section class="view" id="view-register">
+        <div class="section">
+          <div class="container">
+            <p class="section-kicker">SIGN UP</p>
+            <h2>注册</h2>
+            <p class="section-intro">
+              三个字段：用户名、邮箱、密码。走 <code>POST /api/v1/auth/register</code>，
+              注册后会给邮箱发一封带验证链接的信，点了才算完成。
+            </p>
+
+            <div class="auth-grid">
+              <form class="auth-form" id="registerForm" novalidate>
+                <div class="msg" id="registerMsg"></div>
+                <label>用户名
+                  <input type="text" name="username" placeholder="英文/数字，唯一" autocomplete="username" required>
+                </label>
+                <label>邮箱
+                  <input type="email" name="email" placeholder="you@qq.com" autocomplete="email" required>
+                </label>
+                <label>密码
+                  <input type="password" name="password" placeholder="至少 6 位" autocomplete="new-password" required>
+                </label>
+                <div class="auth-actions">
+                  <button class="pixel-button" type="submit">go register <span>→</span></button>
+                  <span class="quiet"><a href="#/login">已有账号，去登录</a></span>
+                </div>
+              </form>
+
+              <div class="term pixel-round">
+                <div class="term-title">
+                  <div class="winbar-lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+                  <span>t-dwag@agent-platform</span><span class="t-right">auth</span>
+                </div>
+                <div class="term-body">
+                  <p><span class="p">$</span> curl -X POST /api/v1/auth/register</p>
+                  <p class="out">-d '{"username":"...","password":"...","email":"..."}'</p>
+                  <p class="dim"># 邮箱必须是你能收到的，验证链接会发过去</p>
+                  <p class="dim"># 用户名/邮箱重复 → 1001 / 1002</p>
+                  <p><span class="p">$</span> <span class="cursor" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 忘记密码 ==================== -->
+      <section class="view" id="view-forgot">
+        <div class="section">
+          <div class="container">
+            <p class="section-kicker">RESET PASSWORD</p>
+            <h2>忘记密码</h2>
+            <p class="section-intro">
+              三步：发验证码 → 校验换 resetToken → 重置密码。对应
+              <code>/forgot-password</code>、<code>/verify-code</code>、<code>/reset-password</code>。
+            </p>
+
+            <div class="auth-grid">
+              <div class="auth-form">
+                <div class="msg" id="forgotMsg"></div>
+                <div class="steps">
+                  <i class="is-on" data-step-dot="1">1 发验证码</i>
+                  <i data-step-dot="2">2 校验验证码</i>
+                  <i data-step-dot="3">3 重置密码</i>
+                </div>
+
+                <form class="step is-on" id="step1" data-step="1" novalidate>
+                  <label>注册邮箱
+                    <input type="email" name="email" placeholder="you@qq.com" required>
+                  </label>
+                  <div class="auth-actions">
+                    <button class="pixel-button" type="submit">go send code <span>→</span></button>
+                  </div>
+                  <p class="note"><span class="q">?</span> 邮箱没注册过也会回成功（后端防账号枚举）。本地调试可以直接从 Redis 取验证码：redis-cli --raw get "forgot_password_code:你的邮箱"</p>
+                </form>
+
+                <form class="step" id="step2" data-step="2" novalidate>
+                  <label>邮箱
+                    <input type="email" name="email" placeholder="you@qq.com" required>
+                  </label>
+                  <label>6 位验证码
+                    <input type="text" name="code" placeholder="123456" maxlength="6" inputmode="numeric" required>
+                  </label>
+                  <div class="auth-actions">
+                    <button class="pixel-button" type="submit">go verify <span>→</span></button>
+                    <button class="pixel-button is-ghost is-sm" type="button" data-goto-step="1">← 上一步</button>
+                  </div>
+                </form>
+
+                <form class="step" id="step3" data-step="3" novalidate>
+                  <label>邮箱
+                    <input type="email" name="email" placeholder="you@qq.com" required>
+                  </label>
+                  <label>重置令牌（上一步返回的 token，自动填入）
+                    <input type="text" name="token" placeholder="32 位十六进制" required>
+                  </label>
+                  <label>新密码
+                    <input type="password" name="newPassword" placeholder="至少 6 位" autocomplete="new-password" required>
+                  </label>
+                  <div class="auth-actions">
+                    <button class="pixel-button" type="submit">go reset <span>→</span></button>
+                    <button class="pixel-button is-ghost is-sm" type="button" data-goto-step="2">← 上一步</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="term pixel-round">
+                <div class="term-title">
+                  <div class="winbar-lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+                  <span>t-dwag@agent-platform</span><span class="t-right">reset</span>
+                </div>
+                <div class="term-body">
+                  <p><span class="p">$</span> POST /forgot-password  {email}</p>
+                  <p class="out">→ 6 位码存 Redis，5 分钟有效</p>
+                  <p><span class="p">$</span> POST /verify-code      {email, code}</p>
+                  <p class="out">→ 返回 resetToken，存 Redis 1 小时</p>
+                  <p><span class="p">$</span> POST /reset-password   {email, token, newPassword}</p>
+                  <p class="out">→ 校验邮箱一致后更新密码</p>
+                  <p><span class="p">$</span> <span class="cursor" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 控制台 ==================== -->
+      <section class="view" id="view-console">
+        <div class="section">
+          <div class="container">
+            <p class="section-kicker">CONSOLE</p>
+            <h2>控制台</h2>
+            <p class="section-intro" id="consoleIntro">
+              登录后的会话状态。<code>userInfo</code> 里 <code>email</code> / <code>avatar</code>
+              目前是空的 —— 后端 <code>token()</code> 只填了 id、username、status、role。
+            </p>
+
+            <div class="auth-grid" style="margin-top:34px">
+              <div>
+                <div class="msg" id="consoleMsg"></div>
+                <dl class="kv" id="userInfoKv"></dl>
+
+                <div class="panel">
+                  <h3>TOKEN</h3>
+                  <div class="token-box" id="tokenBox"></div>
+                  <div class="token-box" id="refreshBox"></div>
+                </div>
+
+                <div class="btn-row">
+                  <button class="pixel-button" type="button" id="btnRefresh">go refresh-token <span>↻</span></button>
+                  <button class="pixel-button is-ghost" type="button" id="btnSubscription">go /subscription/current</button>
+                  <button class="pixel-button is-ghost" type="button" id="btnLogout">go logout</button>
+                </div>
+              </div>
+
+              <div class="term pixel-round">
+                <div class="term-title">
+                  <div class="winbar-lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+                  <span>t-dwag@agent-platform</span><span class="t-right">session</span>
+                </div>
+                <div class="term-body" id="sessionTerm">
+                  <p class="dim">$ 登录后这里会显示会话摘要</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ==================== 请求日志 ==================== -->
+    <section class="section-log">
+      <div class="container">
+        <div class="term pixel-round">
+          <div class="term-title">
+            <div class="winbar-lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+            <span>t-dwag@agent-platform</span>
+            <span class="t-right">/api 请求日志</span>
+          </div>
+          <div class="term-body" id="reqlogBody">
+            <p class="dim">$ 等待请求…</p>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="pixel-button is-ghost is-sm" type="button" id="btnClearLog">clear log</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="statusbar">
+      <span>agent-platform · 前端联调台</span>
+      <span>·</span>
+      <span>API <b id="apiBaseLabel">…</b></span>
+      <span>·</span>
+      <span class="end-flag">▌</span>
+    </footer>
+  </div>
+</body>
+</html>
