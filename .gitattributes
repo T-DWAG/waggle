@@ -1,0 +1,17 @@
+# 行尾统一:仓库内一律 LF。
+# 不加这条时,Windows 编辑器会把文件写成 CRLF,git 就报"整文件重写"的假 diff
+# （本次会话里 README.md / app/main.go / model/user.go 等 8 个文件就是这么被误报的）。
+* text=auto eol=lf
+
+# 图片与字体按二进制处理,不做行尾转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+
+# 容器运行期数据:不做文本归一化（这些文件本来就该移出版本控制）
+docker/data/** -text
