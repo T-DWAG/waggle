@@ -39,3 +39,9 @@ email:
   password: "zjunfdprdsmwebdb"
   from: "2636858254@qq.com"
   baseUrl: "http://127.0.0.1:8888"
+auth:
+  isAuth: true # 本章的真正入口：打开后所有接口都要 token
+  ignores: # 跳过鉴权：这些路径不需要 token
+    - "/api/v1/auth/**"
+  needLogins: # ⚠️ 语义是反的：命中即放行且不塞 userId，它是陷阱，留空
+    - ""
