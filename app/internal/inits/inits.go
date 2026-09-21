@@ -13,5 +13,11 @@ func Init(s *server.Server, conf *config.Config) {
 	database.InitPostgres(conf.DB.Postgres)
 	database.InitRedis(conf.DB.Redis)
 	jwt.Init(conf.Jwt.GetSecret())
-	s.RegisterRouters(&router.Event{}, &router.AuthRouter{}, &router.SubscriptionRouter{})
+	s.RegisterRouters(
+		&router.Event{},
+		&router.AuthRouter{},
+		&router.SubscriptionRouter{},
+		&router.AgentsRouter{},
+		&router.ProviderRouter{},
+	)
 }
