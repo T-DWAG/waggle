@@ -90,25 +90,26 @@ func (s *Service) register(req RegisterReq) (*RegisterResp, error) {
 		EmailVerified: false,
 	}
 
-	err = s.repo.transaction(func(tx *gorm.DB) error {
+	// 先完成用户落库。邮件属于外部依赖，不能放在数据库事务里，
+	// 否则 SMTP 失败会导致注册回滚并统一返回 db error。
+	if err = s.repo.transaction(func(tx *gorm.DB) error {
 		if err := s.repo.saveUser(ctx, tx, u); err != nil {
 			logs.Errorf("create user err:%v", err)
 			return err
 		}
-		// Send verification email
-		if err := s.sendVerificationEmail(u.Email, u.Username, verifyToken); err != nil {
-			logs.Errorf("send verification email err:%v", err)
-			// Don't fail the registration if email sending fails, but log the error
-			return err
-		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, errs.DBError
 	}
-	return &RegisterResp{
-		Message: "注册成功，请检查您的邮箱并点击验证链接完成注册",
-	}, nil
+
+	// 本地或 SMTP 暂不可用时仍保留注册结果，避免用户因邮件服务故障无法注册。
+	// 验证 token 已提前写入 Redis；邮件恢复后可重新补发验证邮件。
+	message := "注册成功，请检查您的邮箱并点击验证链接完成注册"
+	if err := s.sendVerificationEmail(u.Email, u.Username, verifyToken); err != nil {
+		logs.Errorf("send verification email failed for %s: %v", u.Email, err)
+		message = "注册成功，但验证邮件发送失败，请联系管理员或稍后重试"
+	}
+	return &RegisterResp{Message: message}, nil
 }
 
 // buildMail 组装邮件内容

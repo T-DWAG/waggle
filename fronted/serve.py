@@ -96,6 +96,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         self.send_error(405)
 
+    def do_PUT(self):
+        if self._is_api():
+            return self._proxy()
+        self.send_error(405)
+
+    def do_DELETE(self):
+        if self._is_api():
+            return self._proxy()
+        self.send_error(405)
+
+    def do_PATCH(self):
+        if self._is_api():
+            return self._proxy()
+        self.send_error(405)
+
     def do_OPTIONS(self):
         if self._is_api():
             return self._proxy()

@@ -1,347 +1,86 @@
-/* ============================================================
-   agent-platform · 前端联调台
-   只依赖后端已实现的接口：注册 / 验证邮箱 / 登录 / 刷新 token / 忘记密码
-   ============================================================ */
+/* Agent Platform 前端验收台：覆盖智能体、厂商配置、模型与 SSE 调试。 */
 (() => {
   'use strict';
-
   const API_BASE = window.API_BASE || '';
-  const STORE_KEY = 'ap_session';
+  const STORE = 'agent_platform_session';
+  const codes = {999:'数据库或服务调用失败',1001:'用户名已存在',1002:'邮箱已存在',1003:'密码格式错误',1004:'无效 Token',1005:'用户不存在',1006:'邮箱未验证',1007:'Token 生成失败',2001:'智能体不存在',2002:'厂商配置不存在',2003:'模型不存在',2004:'厂商配置不可用',2005:'模型不可用',2006:'智能体模型配置不完整',2007:'不支持的模型厂商',2008:'厂商配置正在被模型使用',2009:'智能体尚未发布或配置未完成',400:'请求参数不合法',401:'未登录或 Token 已过期',500:'服务端错误'};
+  const $ = (s, root=document) => root.querySelector(s);
+  const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+  const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const enc = encodeURIComponent;
+  let session = {token:'',refreshToken:'',userInfo:null};
+  let agents = [], providers = [], models = [], editing = null, chatAbort = null;
 
-  /* ---------- 错误码文案（对齐 common/biz/error.go） ---------- */
-  const CODE_TEXT = {
-    999: 'db error（数据库/发信失败，去看后端日志）',
-    1001: '用户名已存在',
-    1002: '邮箱已存在',
-    1003: '密码格式错误',
-    1004: '无效的 token',
-    1005: '用户不存在',
-    1006: '邮箱未验证',
-    1007: 'token 生成失败',
-    400: '参数不合法（binding 校验没过）',
-    401: '未授权 / 令牌已过期',
-    500: '服务端错误',
-  };
+  function load(){ try { session = {...session,...JSON.parse(localStorage.getItem(STORE)||'{}')}; } catch (_){} }
+  function save(){ localStorage.setItem(STORE, JSON.stringify(session)); }
+  function clear(){ session={token:'',refreshToken:'',userInfo:null}; localStorage.removeItem(STORE); }
+  function toast(text, error=false){ const n=document.createElement('div'); n.className='toast'+(error?' error':''); n.textContent=text; $('#toastWrap').append(n); setTimeout(()=>n.remove(),3500); }
+  function log(method,path,status,data,ms){ const empty=$('#requestLog .muted'); if(empty) $('#requestLog').innerHTML=''; const line=document.createElement('p'); line.className='log-line'; const ok=String(status).startsWith('2'); let detail=''; if(data !== undefined){ try{detail=typeof data==='string'?data:JSON.stringify(data);}catch(_){detail='[无法序列化]';} if(detail.length>460) detail=detail.slice(0,460)+'…'; } line.innerHTML=`<span class="method">${esc(method)}</span> ${esc(path)} <span class="${ok?'ok':'bad'}">${esc(status)}</span> ${ms?esc(ms+'ms'):''}${detail?'\n  '+esc(detail):''}`; $('#requestLog').append(line); $('#requestLog').scrollTop=$('#requestLog').scrollHeight; }
+  function errorText(r){ return (r&&r.msg) || codes[r&&r.code] || '请求未成功'; }
+  async function api(method,path,body,auth=true){ const started=performance.now(); const headers={'Content-Type':'application/json'}; if(auth&&session.token)headers.Authorization='Bearer '+session.token; try{ const response=await fetch(API_BASE+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)}); const raw=await response.text(); let payload; try{payload=raw?JSON.parse(raw):{};}catch(_){payload=raw;} log(method,path,response.status,payload,Math.round(performance.now()-started)); if(!response.ok || (payload && payload.code !== undefined && payload.code !== 200)) return {...(typeof payload==='object'?payload:{}),code:(payload&&payload.code)||response.status,msg:(payload&&payload.msg)||'HTTP '+response.status}; return payload; }catch(err){ log(method,path,'NET',err.message,Math.round(performance.now()-started)); return {code:'NET',msg:'网络错误：'+err.message}; } }
+  function dataOf(r){ return r && (r.data !== undefined ? r.data : r); }
+  function setConnection(){ const online=!!session.token; $('.connection').classList.toggle('online',online); $('#connectionText').textContent=online?(session.userInfo?.username||'已登录'):'未登录'; $('#logoutBtn').hidden=!online; }
+  function setAuthMessage(id,text,ok=false){ const el=$(id);el.textContent=text||'';el.classList.toggle('ok',!!ok); }
 
-  /* ---------- DOM helpers ---------- */
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  function route(){ if(!session.token){ $('#page-login').classList.remove('hidden'); $('#appPage').classList.add('hidden'); return; } $('#page-login').classList.add('hidden'); $('#appPage').classList.remove('hidden'); const name=(location.hash||'#/agents').replace('#/',''); const valid=['agents','providers','models','chat'].includes(name)?name:'agents'; $$('.route-page').forEach(x=>x.classList.toggle('hidden',x.id!=='route-'+valid)); $$('.side-nav a').forEach(x=>x.classList.toggle('active',x.dataset.route===valid)); if(valid==='agents') refreshAgents(); if(valid==='providers') refreshProviders(); if(valid==='models') refreshModels(); if(valid==='chat') refreshChatAgents(); }
+  function renderUser(){ const u=session.userInfo||{}; $('#userName').textContent=u.username||'当前用户'; $('#userRole').textContent=u.role||'已登录用户'; $('#userAvatar').textContent=(u.username||'A').slice(0,1).toUpperCase(); setConnection(); }
 
-  /* ---------- 会话状态 ---------- */
-  let state = { token: '', refreshToken: '', expire: 0, refreshExpire: 0, userInfo: null };
+  async function refreshAgents(){ const r=await api('POST','/api/v1/agents/list',{name:$('#agentSearch').value.trim(),status:$('#agentStatusFilter').value,page:1,pageSize:100}); if(r.code&&r.code!==200){$('#agentNotice').textContent=errorText(r);return;} const d=dataOf(r)||{}; agents=d.agents||[]; $('#agentCount').textContent=d.total??agents.length; renderAgents(); }
+  async function refreshModelData(){ if(!providers.length) await refreshProviders(); const r=await api('GET','/api/v1/llms?page=1&pageSize=100&modelType=chat'); if(r.code&&r.code!==200){toast(errorText(r),true);return;} const d=dataOf(r)||{}; models=d.llms||[]; }
+  function renderAgents(){ const list=$('#agentList'); list.innerHTML=agents.map(a=>`<article class="agent-card card ${esc(a.status)}"><div class="card-top"><div class="agent-icon">${esc(a.icon||'✦')}</div><div><div class="agent-name">${esc(a.name)}</div><span class="pill ${esc(a.status)}">${statusName(a.status)}</span></div></div><p class="agent-desc">${esc(a.description||'尚未添加描述')}</p><div class="agent-meta"><span>${esc(a.modelProvider||'未配置厂商')}</span><span>${esc(a.modelName||'未配置模型')}</span></div><div class="agent-actions"><button class="button ghost small" data-edit-agent="${a.id}">编辑</button><button class="button ghost small" data-chat-agent="${a.id}" ${a.status!=='published'?'disabled':''}>对话</button></div></article>`).join(''); $('#agentEmpty').classList.toggle('hidden',agents.length!==0); $$('[data-edit-agent]').forEach(b=>b.onclick=()=>openModal('agent',agents.find(a=>a.id===b.dataset.editAgent))); $$('[data-chat-agent]').forEach(b=>b.onclick=()=>{location.hash='#/chat'; setTimeout(()=>{$('#chatAgent').value=b.dataset.chatAgent; $('#chatAgent').dispatchEvent(new Event('change'));},200);}); }
+  function statusName(v){ return ({draft:'草稿',published:'已发布',archived:'已归档',active:'可用',inactive:'停用'})[v]||v||'—'; }
 
-  function loadSession() {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      if (raw) state = Object.assign(state, JSON.parse(raw));
-    } catch (e) { /* 损坏就丢弃 */ }
+  async function refreshProviders(){ const r=await api('GET','/api/v1/provider-configs?page=1&pageSize=100'); if(r.code&&r.code!==200){toast(errorText(r),true);return;} const d=dataOf(r)||{};providers=d.providerConfigs||[]; renderProviders(); fillProviderOptions(); }
+  function renderProviders(){ $('#providerList').innerHTML=providers.map(p=>`<tr><td><b>${esc(p.name)}</b><small>${esc(p.provider)}</small></td><td>${esc(p.apiBase||'默认地址')}</td><td>${p.hasApiKey?esc(p.apiKey||'已配置'):'未配置'}</td><td><span class="pill ${esc(p.status)}">${statusName(p.status)}</span></td><td>${formatTime(p.updatedAt)}</td><td><div class="row-actions"><button class="button ghost small" data-edit-provider="${p.id}">编辑</button><button class="button ghost small danger" data-del-provider="${p.id}">删除</button></div></td></tr>`).join(''); $('#providerEmpty').classList.toggle('hidden',providers.length!==0); $$('[data-edit-provider]').forEach(b=>b.onclick=()=>openModal('provider',providers.find(p=>p.id===b.dataset.editProvider))); $$('[data-del-provider]').forEach(b=>b.onclick=()=>deleteProvider(b.dataset.delProvider)); }
+  function fillProviderOptions(){ const options='<option value="">全部厂商配置</option>'+providers.map(p=>`<option value="${p.id}">${esc(p.name)} · ${esc(p.provider)}</option>`).join(''); const filter=$('#modelProviderFilter'); const keep=filter.value;filter.innerHTML=options;filter.value=keep; }
+  async function deleteProvider(id){ const p=providers.find(x=>x.id===id);if(!confirm(`删除厂商配置「${p?.name||''}」？关联模型存在时后端会拒绝删除。`))return;const r=await api('DELETE','/api/v1/provider-configs/'+id);if(r.code&&r.code!==200)return toast(errorText(r),true);toast('已删除厂商配置');refreshProviders(); }
+
+  async function refreshModels(){ if(!providers.length) await refreshProviders(); const config=$('#modelProviderFilter').value, type=$('#modelTypeFilter').value;let path='/api/v1/llms?page=1&pageSize=100';if(config)path+='&providerConfigId='+enc(config);if(type)path+='&modelType='+enc(type); const r=await api('GET',path);if(r.code&&r.code!==200){toast(errorText(r),true);return;}const d=dataOf(r)||{};models=d.llms||[];renderModels(); }
+  function providerName(id){ const p=providers.find(x=>x.id===id);return p?`${p.name} · ${p.provider}`:'未知配置'; }
+  function renderModels(){ $('#modelList').innerHTML=models.map(m=>`<tr><td><b>${esc(m.name)}</b><small>${esc(m.description||'无描述')}</small></td><td><code>${esc(m.modelName)}</code></td><td>${esc(providerName(m.providerConfigId))}</td><td>${esc(m.modelType)}</td><td><span class="pill ${esc(m.status)}">${statusName(m.status)}</span></td><td><div class="row-actions"><button class="button ghost small" data-edit-model="${m.id}">编辑</button><button class="button ghost small danger" data-del-model="${m.id}">删除</button></div></td></tr>`).join('');$('#modelEmpty').classList.toggle('hidden',models.length!==0);$$('[data-edit-model]').forEach(b=>b.onclick=()=>openModal('model',models.find(m=>m.id===b.dataset.editModel)));$$('[data-del-model]').forEach(b=>b.onclick=()=>deleteModel(b.dataset.delModel)); }
+  async function deleteModel(id){const m=models.find(x=>x.id===id);if(!confirm(`删除模型「${m?.name||''}」？`))return;const r=await api('DELETE','/api/v1/llms/'+id);if(r.code&&r.code!==200)return toast(errorText(r),true);toast('已删除模型');refreshModels();}
+
+  async function openModal(type,item=null){
+    if(type==='agent') await refreshModelData();
+    const formItem = item || {};
+    editing={type,item:item || null};
+    $('#modalBackdrop').classList.remove('hidden');
+    $('#modalTitle').textContent=item?`编辑${type==='agent'?'智能体':type==='provider'?'厂商配置':'模型'}`:`新建${type==='agent'?'智能体':type==='provider'?'厂商配置':'模型'}`;
+    const form=$('#entityForm');
+    if(type==='agent') form.innerHTML=agentForm(formItem);
+    if(type==='provider') form.innerHTML=providerForm(formItem);
+    if(type==='model') form.innerHTML=modelForm(formItem);
+    form.onsubmit=submitEntity;
   }
-  function saveSession() {
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
-  }
-  function clearSession() {
-    state = { token: '', refreshToken: '', expire: 0, refreshExpire: 0, userInfo: null };
-    localStorage.removeItem(STORE_KEY);
-  }
-
-  /* ---------- 提示条 ---------- */
-  function msg(el, text, ok) {
-    const node = typeof el === 'string' ? $(el) : el;
-    if (!node) return;
-    node.className = 'msg is-on' + (ok ? ' is-ok' : '');
-    node.innerHTML = '<span class="tag">' + (ok ? 'ok' : 'err') + '</span> ' + escapeHtml(text);
-  }
-  function clearMsg(el) {
-    const node = typeof el === 'string' ? $(el) : el;
-    if (node) { node.className = 'msg'; node.textContent = ''; }
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  /* ---------- 请求日志（终端） ---------- */
-  let logCount = 0;
-  function logLine(method, path, status, ms, data, isBad) {
-    const body = $('#reqlogBody');
-    if (logCount === 0) body.innerHTML = '';
-    logCount += 1;
-
-    const line = document.createElement('p');
-    line.className = 'rl';
-    line.innerHTML =
-      '<span class="rl-m">' + escapeHtml(method) + '</span>' +
-      '<span class="rl-p">' + escapeHtml(path) + '</span>' +
-      '<span class="rl-s ' + (isBad ? 'is-bad' : 'is-ok') + '">' + escapeHtml(String(status)) + '</span>' +
-      '<span class="rl-t">' + Math.round(ms) + 'ms</span>';
-    body.appendChild(line);
-
-    if (data !== undefined) {
-      const res = document.createElement('p');
-      res.className = 'res';
-      let text = typeof data === 'string' ? data : JSON.stringify(data);
-      if (text && text.length > 600) text = text.slice(0, 600) + ' …(截断)';
-      res.textContent = '  ' + text;
-      body.appendChild(res);
+  function closeModal(){$('#modalBackdrop').classList.add('hidden');editing=null;}
+  function modelKey(provider, name){ return `${provider}::${name}`; }
+  function providerForModel(m){ return providers.find(p=>p.id===m.providerConfigId); }
+  function agentModelOptions(a={}){
+    const current = a.modelProvider && a.modelName ? modelKey(a.modelProvider, a.modelName) : '';
+    const chatModels = models.filter(m=>m.modelType==='chat');
+    let options = '<option value="">未配置模型（保存为草稿）</option>';
+    options += chatModels.map(m=>{
+      const p=providerForModel(m), provider=p?.provider||'';
+      return `<option value="${esc(modelKey(provider,m.modelName))}" ${current===modelKey(provider,m.modelName)?'selected':''}>${esc(p?.name||provider)} · ${esc(m.modelName)}${m.status!=='active'?'（已停用）':''}</option>`;
+    }).join('');
+    if(current && !chatModels.some(m=>{const p=providerForModel(m);return modelKey(p?.provider||'',m.modelName)===current;})){
+      options += `<option value="${esc(current)}" selected>${esc(a.modelProvider)} · ${esc(a.modelName)}（当前配置未登记）</option>`;
     }
-    body.scrollTop = body.scrollHeight;
+    return options;
   }
+  function agentForm(a={}){const qdata=a.suggestedQuestions||{};const qitems=Array.isArray(qdata)?qdata:(Array.isArray(qdata.items)?qdata.items:[]);const qs=qitems.map(x=>typeof x==='string'?x:x.text).join('\n');return `<div class="form-row"><label>名称<input name="name" value="${esc(a.name||'')}" required></label><label>状态<select name="status"><option value="draft" ${a.status==='draft'?'selected':''}>草稿</option><option value="published" ${a.status==='published'?'selected':''}>已发布（必须有可用模型）</option><option value="archived" ${a.status==='archived'?'selected':''}>已归档</option></select></label></div><label>描述<input name="description" value="${esc(a.description||'')}" placeholder="这个智能体做什么？"></label><label>图标（字符或 URL）<input name="icon" value="${esc(a.icon||'')}" placeholder="例如 ✦"></label><label>系统提示词<textarea name="systemPrompt" placeholder="定义角色、能力边界和回答风格">${esc(a.systemPrompt||'')}</textarea></label><label>关联 Chat 模型<select name="modelRef">${agentModelOptions(a)}</select><span class="field-help">这里选择的是模型管理中的“模型标识”，例如 <code>qwen-plus</code>、<code>gpt-4o-mini</code>；必须与模型管理中的 modelName 完全一致。</span></label><label>开场白<textarea name="openingDialogue" placeholder="你好，我可以帮你…">${esc(a.openingDialogue||'')}</textarea></label><label>建议问题（每行一个）<textarea name="suggestedQuestions" placeholder="帮我总结这段内容\n给我一个执行计划">${esc(qs)}</textarea></label>${modalButtons()}`;}
+  function providerForm(p={}){return `<div class="form-row"><label>配置名称<input name="name" value="${esc(p.name||'')}" required placeholder="我的 OpenAI"></label><label>厂商标识<select name="provider"><option value="openai" ${p.provider==='openai'?'selected':''}>openai</option><option value="qwen" ${p.provider==='qwen'?'selected':''}>qwen</option><option value="ollama" ${p.provider==='ollama'?'selected':''}>ollama</option></select></label></div><label>描述<input name="description" value="${esc(p.description||'')}" placeholder="可选说明"></label><label>API Key<input name="apiKey" type="password" ${p.id?'placeholder="留空则保持原密钥"':'required'}><span class="field-help">密钥仅提交给后端；列表中仅可见掩码。</span></label><label>API Base<input name="apiBase" value="${esc(p.apiBase||'')}" placeholder="留空使用 SDK 默认地址；Ollama 通常为 http://localhost:11434"></label><label>状态<select name="status"><option value="active" ${p.status!=='inactive'?'selected':''}>可用 active</option><option value="inactive" ${p.status==='inactive'?'selected':''}>停用 inactive</option></select></label>${modalButtons()}`;}
+  function modelForm(m={}){const options=providers.map(p=>`<option value="${p.id}" ${m.providerConfigId===p.id?'selected':''}>${esc(p.name)} · ${esc(p.provider)}</option>`).join('');return `<label>显示名称<input name="name" value="${esc(m.name||'')}" required placeholder="GPT-4o Mini"></label><div class="form-row"><label>所属厂商配置<select name="providerConfigId" required><option value="">请选择</option>${options}</select></label><label>模型标识<input name="modelName" value="${esc(m.modelName||'')}" required placeholder="gpt-4o-mini"></label></div><label>描述<input name="description" value="${esc(m.description||'')}"></label><div class="form-row"><label>模型类型<select name="modelType"><option value="chat" ${m.modelType!=='embedding'&&m.modelType!=='vision'?'selected':''}>chat</option><option value="embedding" ${m.modelType==='embedding'?'selected':''}>embedding</option><option value="vision" ${m.modelType==='vision'?'selected':''}>vision</option></select></label><label>状态<select name="status"><option value="active" ${m.status!=='inactive'?'selected':''}>可用 active</option><option value="inactive" ${m.status==='inactive'?'selected':''}>停用 inactive</option></select></label></div><div class="form-row"><label>最大 tokens<input name="maxTokens" type="number" min="0" value="${esc(m.config?.maxTokens||'')}"></label><label>温度（0–2）<input name="temperature" type="number" min="0" max="2" step="0.1" value="${esc(m.config?.temperature??'')}"></label></div>${modalButtons()}`;}
+  function modalButtons(){return '<div class="modal-actions"><button class="button ghost" id="cancelModal" type="button">取消</button><button class="button primary" type="submit">保存配置</button></div>';}
+  function formValues(form){return Object.fromEntries(new FormData(form).entries());}
+  async function submitEntity(e){e.preventDefault();const raw=formValues(e.target),{type,item}=editing;let r;if(type==='agent'){let modelProvider='',modelName='';if(raw.modelRef){[modelProvider,modelName]=raw.modelRef.split('::');}const body={name:raw.name,description:raw.description,icon:raw.icon,status:raw.status,systemPrompt:raw.systemPrompt,modelProvider,modelName,openingDialogue:raw.openingDialogue,suggestedQuestions:{items:raw.suggestedQuestions.split('\n').map(x=>x.trim()).filter(Boolean)}};r=item?await api('PUT','/api/v1/agents/update',{id:item.id,...body}):await api('POST','/api/v1/agents/create',{name:raw.name,description:raw.description,status:'draft'});if(!item&&(!r.code||r.code===200)&&raw.modelRef){const created=dataOf(r)||{};const createdID=created.id||created.agent?.id;if(createdID){r=await api('PUT','/api/v1/agents/update',{id:createdID,...body});}}}if(type==='provider'){const body={name:raw.name,provider:raw.provider,description:raw.description,apiBase:raw.apiBase,status:raw.status};if(raw.apiKey)body.apiKey=raw.apiKey;r=item?await api('PUT','/api/v1/provider-configs/'+item.id,body):await api('POST','/api/v1/provider-configs/',{...body,apiKey:raw.apiKey});}if(type==='model'){const body={name:raw.name,description:raw.description,providerConfigId:raw.providerConfigId,modelName:raw.modelName,modelType:raw.modelType,status:raw.status,config:{maxTokens:Number(raw.maxTokens)||0,temperature:Number(raw.temperature)||0,topP:0}};r=item?await api('PUT','/api/v1/llms/'+item.id,body):await api('POST','/api/v1/llms/',body);}if(r.code&&r.code!==200){toast(errorText(r),true);return;}toast('保存成功');closeModal();if(type==='agent')refreshAgents();if(type==='provider'){refreshProviders();}if(type==='model')refreshModels();}
 
-  /* ---------- 统一请求 ---------- */
-  async function call(method, path, body, opts = {}) {
-    const headers = { 'Content-Type': 'application/json' };
-    const token = opts.token || state.token;
-    if (opts.auth && token) headers['Authorization'] = 'Bearer ' + token;
+  async function refreshChatAgents(){if(!agents.length) await refreshAgents(); if(!models.length) await refreshModels(); const published=agents.filter(a=>a.status==='published'); const select=$('#chatAgent'),keep=select.value;select.innerHTML='<option value="">请选择已发布智能体</option>'+published.map(a=>`<option value="${a.id}">${esc(a.name)} · ${esc(a.modelName||'未配置模型')}</option>`).join('');select.value=keep;updateChatInfo();}
+  function updateChatInfo(){const a=agents.find(x=>x.id===$('#chatAgent').value);$('#chatTitle').textContent=a?a.name:'等待选择智能体';$('#chatAgentInfo').textContent=a?`模型：${a.modelProvider||'—'} / ${a.modelName||'—'}\n状态：${statusName(a.status)}`:'请选择一个智能体';}
+  function addBubble(kind,text){const history=$('#chatHistory');const welcome=$('.chat-welcome',history);if(welcome)welcome.remove();const n=document.createElement('div');n.className='bubble '+kind;n.textContent=text;history.append(n);history.scrollTop=history.scrollHeight;return n;}
+  async function streamChat(message){const agentId=$('#chatAgent').value;if(!agentId)return toast('请先选择已发布智能体',true);if(chatAbort)return;addBubble('user',message);const bubble=addBubble('assistant','');$('#streamState').textContent='streaming';$('#chatSend').disabled=true;chatAbort=new AbortController();const started=performance.now();try{const res=await fetch(API_BASE+'/api/v1/agents/chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token,'Accept':'text/event-stream'},body:JSON.stringify({agentId,message}),signal:chatAbort.signal});if(!res.ok){const text=await res.text();log('POST','/api/v1/agents/chat',res.status,text,Math.round(performance.now()-started));bubble.classList.add('error');bubble.textContent='请求失败：'+text;return;}log('POST','/api/v1/agents/chat',res.status,'SSE connected',Math.round(performance.now()-started));const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';for(;;){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const frames=buffer.split('\n\n');buffer=frames.pop();for(const frame of frames){const line=frame.split('\n').find(x=>x.startsWith('data:'));if(!line)continue;const raw=line.slice(5).trim();if(raw==='[DONE]'){log('SSE','[DONE]',200,undefined);continue;}if(raw.startsWith('[ERROR]')){bubble.classList.add('error');bubble.textContent+=raw.replace(/^\[ERROR\]\s*/, '');log('SSE','error',500,raw);continue;}try{const event=JSON.parse(raw);const content=event.content||'';if(content)bubble.textContent+=content;if(event.isErr)bubble.classList.add('error');}catch(_){bubble.textContent+=raw;}$('#chatHistory').scrollTop=$('#chatHistory').scrollHeight;}}}catch(err){if(err.name!=='AbortError'){bubble.classList.add('error');bubble.textContent='流式连接错误：'+err.message;log('SSE','/agents/chat','NET',err.message);}}finally{chatAbort=null;$('#streamState').textContent='idle';$('#chatSend').disabled=false;}}
+  function formatTime(v){if(!v)return '—';const d=new Date(v);return isNaN(d)?v:d.toLocaleString('zh-CN',{hour12:false});}
 
-    const t0 = performance.now();
-    let res;
-    try {
-      res = await fetch(API_BASE + path, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch (e) {
-      logLine(method, path, 'NET', performance.now() - t0, String(e), true);
-      return { code: 'NET_ERR', msg: '请求发不出去：' + e.message + '（后端起了吗？serve.py 起了吗？）' };
-    }
-
-    const raw = await res.text();
-    let data;
-    try { data = JSON.parse(raw); } catch (e) { data = raw; }
-    const ms = performance.now() - t0;
-
-    if (res.status === 302 || res.redirected) {
-      logLine(method, path, res.status, ms, data, false);
-      return { code: 302, msg: '已重定向' };
-    }
-    logLine(method, path, res.status, ms, data, !res.ok || (data && data.code !== 200));
-    if (!res.ok) return { code: res.status, msg: 'HTTP ' + res.status };
-    return data;
-  }
-
-  function describe(r) {
-    const code = r && r.code;
-    const text = (r && r.msg) || '';
-    return '[' + code + '] ' + (text || CODE_TEXT[code] || '未知错误');
-  }
-
-  /* ---------- 视图路由 ---------- */
-  const PATHS = { login: '~/login', register: '~/register', forgot: '~/forgot', console: '~/console' };
-
-  function show(view) {
-    if (view === 'console' && !state.token) {
-      msg('#loginMsg', '请先登录');
-      view = 'login';
-    }
-    $$('.view').forEach(v => v.classList.toggle('is-active', v.id === 'view-' + view));
-    $$('.gonav a').forEach(a => a.classList.toggle('is-active', a.dataset.view === view));
-    $('#winbarPath').textContent = PATHS[view] || '~/';
-    $('#gonav').classList.remove('is-open');
-    if (view === 'console') renderConsole();
-    window.scrollTo({ top: 0, behavior: 'auto' });
-  }
-
-  function currentView() {
-    const h = (location.hash || '').replace(/^#\/?/, '');
-    return PATHS[h] ? h : 'login';
-  }
-
-  /* ---------- 导航状态 ---------- */
-  function renderNav() {
-    const on = !!state.token;
-    $('#navStatus').classList.toggle('is-on', on);
-    $('#navStatusText').textContent = on
-      ? (state.userInfo && state.userInfo.username ? state.userInfo.username : '已登录')
-      : '未登录';
-  }
-
-  /* ---------- 登录 ---------- */
-  $('#loginForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = e.target;
-    clearMsg('#loginMsg');
-    const r = await call('POST', '/api/v1/auth/login', {
-      username: f.username.value.trim(),
-      password: f.password.value,
-    });
-    if (r.code !== 200) return msg('#loginMsg', describe(r));
-    state.token = r.data.token || '';
-    state.refreshToken = r.data.refreshToken || '';
-    state.expire = r.data.expire || 0;
-    state.refreshExpire = r.data.refreshExpire || 0;
-    state.userInfo = r.data.userInfo || null;
-    saveSession();
-    renderNav();
-    msg('#consoleMsg', '登录成功', true);
-    location.hash = '#/console';
-    show('console');
-  });
-
-  /* ---------- 注册 ---------- */
-  $('#registerForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = e.target;
-    clearMsg('#registerMsg');
-    const email = f.email.value.trim();
-    const r = await call('POST', '/api/v1/auth/register', {
-      username: f.username.value.trim(),
-      password: f.password.value,
-      email: email,
-    });
-    if (r.code !== 200) return msg('#registerMsg', describe(r));
-    msg('#registerMsg', (r.data && r.data.message) + ' → 收件箱：' + email + '（点完链接回来登录）', true);
-  });
-
-  /* ---------- 忘记密码：三步 ---------- */
-  let resetCtx = { email: '', token: '' };
-
-  function gotoStep(n) {
-    $$('.steps i').forEach(i => i.classList.toggle('is-on', Number(i.dataset.stepDot) === n));
-    $$('.step').forEach(s => s.classList.toggle('is-on', Number(s.dataset.step) === n));
-    clearMsg('#forgotMsg');
-  }
-
-  $('#step1').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = e.target.email.value.trim();
-    const r = await call('POST', '/api/v1/auth/forgot-password', { email });
-    if (r.code !== 200) return msg('#forgotMsg', describe(r));
-    resetCtx.email = email;
-    $('#step2').email.value = email;
-    $('#step3').email.value = email;
-    gotoStep(2);
-    msg('#forgotMsg', (r.data && r.data.message) + '（5 分钟内有效）', true);
-  });
-
-  $('#step2').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = e.target.email.value.trim();
-    const code = e.target.code.value.trim();
-    const r = await call('POST', '/api/v1/auth/verify-code', { email, code });
-    if (r.code !== 200) return msg('#forgotMsg', describe(r));
-    resetCtx.email = email;
-    resetCtx.token = (r.data && r.data.token) || '';
-    $('#step3').email.value = email;
-    $('#step3').token.value = resetCtx.token;
-    gotoStep(3);
-    msg('#forgotMsg', '验证码通过，已换到 resetToken，填新密码即可', true);
-  });
-
-  $('#step3').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const r = await call('POST', '/api/v1/auth/reset-password', {
-      email: e.target.email.value.trim(),
-      token: e.target.token.value.trim(),
-      newPassword: e.target.newPassword.value,
-    });
-    if (r.code !== 200) return msg('#forgotMsg', describe(r));
-    msg('#forgotMsg', (r.data && r.data.message) + '，可以去登录了', true);
-    setTimeout(() => { location.hash = '#/login'; }, 900);
-  });
-
-  $$('[data-goto-step]').forEach(btn => {
-    btn.addEventListener('click', () => gotoStep(Number(btn.dataset.gotoStep)));
-  });
-
-  /* ---------- 控制台 ---------- */
-  function fmtTime(ms) {
-    if (!ms) return '';
-    const d = new Date(ms);
-    const pad = n => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-  }
-  function leftText(ms) {
-    if (!ms) return '';
-    const diff = ms - Date.now();
-    if (diff <= 0) return '（已过期）';
-    const h = Math.floor(diff / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    return '（还剩 ' + h + 'h ' + m + 'm）';
-  }
-
-  function renderConsole() {
-    const u = state.userInfo || {};
-    const rows = [
-      ['id', u.id],
-      ['username', u.username],
-      ['role', u.role],
-      ['status', u.status === 1 ? '1 · normal' : u.status === 2 ? '2 · disable' : u.status === 3 ? '3 · pending' : u.status],
-      ['email', u.email],
-      ['avatar', u.avatar],
-    ];
-    $('#userInfoKv').innerHTML = rows.map(([k, v]) =>
-      '<dt>' + escapeHtml(k) + '</dt>' +
-      '<dd class="' + (v === '' || v === undefined || v === null ? 'empty' : '') + '">' +
-      escapeHtml(v === '' || v === undefined || v === null ? '(空)' : String(v)) + '</dd>'
-    ).join('');
-
-    $('#tokenBox').innerHTML = '<b>token</b> ' + escapeHtml(state.token || '(空)') +
-      '<br><b>expire</b> ' + escapeHtml(fmtTime(state.expire)) + ' ' + escapeHtml(leftText(state.expire));
-    $('#refreshBox').innerHTML = '<b>refreshToken</b> ' + escapeHtml(state.refreshToken || '(空)') +
-      '<br><b>refreshExpire</b> ' + escapeHtml(fmtTime(state.refreshExpire)) + ' ' + escapeHtml(leftText(state.refreshExpire));
-
-    $('#sessionTerm').innerHTML =
-      '<p><span class="p">$</span> whoami</p>' +
-      '<p class="out">&gt; ' + escapeHtml(u.username || '(未登录)') + ' · ' + escapeHtml(u.role || '-') + '</p>' +
-      '<p><span class="p">$</span> echo $TOKEN</p>' +
-      '<p class="out">&gt; ' + escapeHtml(state.token ? state.token.slice(0, 24) + '…' : '(无)') + '</p>' +
-      '<p><span class="p">$</span> <span class="cursor" aria-hidden="true"></span></p>';
-  }
-
-  $('#btnRefresh').addEventListener('click', async () => {
-    clearMsg('#consoleMsg');
-    if (!state.refreshToken) return msg('#consoleMsg', '没有 refreshToken，先登录');
-    const r = await call('POST', '/api/v1/auth/refresh-token', { refreshToken: state.refreshToken });
-    if (r.code !== 200) return msg('#consoleMsg', describe(r));
-    state.token = r.data.token || '';
-    state.refreshToken = r.data.refreshToken || '';
-    state.expire = r.data.expire || 0;
-    state.refreshExpire = r.data.refreshExpire || 0;
-    if (r.data.userInfo) state.userInfo = r.data.userInfo;
-    saveSession();
-    renderConsole();
-    msg('#consoleMsg', 'token 已刷新', true);
-  });
-
-  $('#btnSubscription').addEventListener('click', async () => {
-    clearMsg('#consoleMsg');
-    const r = await call('GET', '/api/v1/subscription/current', null, { auth: true });
-    if (r.code !== 200) return msg('#consoleMsg', describe(r));
-    msg('#consoleMsg', '订阅接口返回：plan=' + r.data.plan + ' / ' + r.data.duration +
-      ' / 上限 agents=' + r.data.configs.maxAgents, true);
-  });
-
-  $('#btnLogout').addEventListener('click', () => {
-    clearSession();
-    renderNav();
-    location.hash = '#/login';
-    show('login');
-    msg('#loginMsg', '已退出登录', true);
-  });
-
-  $('#btnClearLog').addEventListener('click', () => {
-    logCount = 0;
-    $('#reqlogBody').innerHTML = '<p class="dim">$ 等待请求…</p>';
-  });
-
-  /* ---------- 导航交互 ---------- */
-  $$('.gonav a').forEach(a => a.addEventListener('click', () => {
-    setTimeout(() => show(currentView()), 0);
-  }));
-  $('.gonav-toggle').addEventListener('click', (e) => {
-    const nav = $('#gonav');
-    const open = nav.classList.toggle('is-open');
-    e.currentTarget.setAttribute('aria-expanded', String(open));
-  });
-  window.addEventListener('hashchange', () => show(currentView()));
-
-  /* ---------- 启动 ---------- */
-  loadSession();
-  renderNav();
-  $('#apiBaseLabel').textContent = (API_BASE || location.origin) + '/api';
-  show(currentView() === 'console' ? 'console' : currentView());
-  if (location.pathname === '/login' && !state.token) {
-    msg('#loginMsg', '如果你刚点完邮件里的验证链接，现在直接登录就行', true);
-  }
+  function bind(){ $$('.tab').forEach(t=>t.onclick=()=>{$$('.tab').forEach(x=>x.classList.toggle('active',x===t));$('#loginForm').classList.toggle('hidden',t.dataset.authTab!=='login');$('#registerForm').classList.toggle('hidden',t.dataset.authTab!=='register');}); $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=formValues(e.target);const r=await api('POST','/api/v1/auth/login',{username:f.username,password:f.password},false);if(r.code!==200)return setAuthMessage('#loginMessage',errorText(r));const d=dataOf(r)||{};session={token:d.token||'',refreshToken:d.refreshToken||'',userInfo:d.userInfo||null};save();renderUser();location.hash='#/agents';route();toast('登录成功');}; $('#registerForm').onsubmit=async e=>{e.preventDefault();const f=formValues(e.target);const r=await api('POST','/api/v1/auth/register',f,false);setAuthMessage('#registerMessage',r.code===200?'注册成功，请在邮箱完成验证后登录。':errorText(r),r.code===200);}; $('#logoutBtn').onclick=()=>{if(chatAbort)chatAbort.abort();clear();renderUser();location.hash='#/login';route();}; $('#agentSearchBtn').onclick=refreshAgents;$('#agentSearch').addEventListener('keydown',e=>{if(e.key==='Enter')refreshAgents();});$('#modelSearchBtn').onclick=refreshModels;$$('[data-open-modal]').forEach(b=>b.onclick=async()=>{if(b.dataset.openModal==='model'&&!providers.length)await refreshProviders();openModal(b.dataset.openModal);});$('#closeModalBtn').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target===$('#modalBackdrop'))closeModal();};$('#entityForm').addEventListener('click',e=>{if(e.target.id==='cancelModal')closeModal();});$('#clearLogBtn').onclick=()=>$('#requestLog').innerHTML='<p class="muted">等待 API 请求…</p>';$('#chatAgent').onchange=updateChatInfo;$('#clearChatBtn').onclick=()=>{$('#chatHistory').innerHTML='<div class="chat-welcome">会话已清空，可以继续开始新的验收对话。</div>';};$('#chatForm').onsubmit=e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;input.value='';streamChat(text);};$('#chatInput').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#chatForm').requestSubmit();}};window.addEventListener('hashchange',route); }
+  load();bind();renderUser();$('#apiBaseLabel').textContent=(API_BASE||location.origin)+'/api';route();
 })();
