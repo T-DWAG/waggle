@@ -20,4 +20,11 @@ var (
 	ErrUnsupportedProvider       = errs.NewError(2007, "不支持的模型厂商")
 	ErrProviderConfigInUse       = errs.NewError(2008, "厂商配置正在被模型使用")
 	ErrAgentNotReady             = errs.NewError(2009, "智能体尚未发布或配置未完成")
+
+	ErrToolAlreadyExists = errs.NewError(3001, "工具已存在")
+	ErrToolNotExist      = errs.NewError(3002, "工具不存在")
+	ErrToolNotRegistered = errs.NewError(3003, "系统工具未注册")
+	ErrToolDisabled      = errs.NewError(3004, "工具已停用")
+	ErrInvalidToolType   = errs.NewError(3005, "不支持的工具类型")
+	ErrMcpConfigRequired = errs.NewError(3006, "MCP 工具缺少配置")
 )

@@ -52,9 +52,10 @@
             <a href="#/agents" data-route="agents"><span>▣</span>智能体 <b id="agentCount">0</b></a>
             <a href="#/providers" data-route="providers"><span>◈</span>厂商配置</a>
             <a href="#/models" data-route="models"><span>◇</span>模型管理</a>
+            <a href="#/tools" data-route="tools"><span>⚙</span>工具管理</a>
             <a href="#/chat" data-route="chat"><span>✦</span>调试对话</a>
           </nav>
-          <div class="sidebar-note"><b>验收顺序</b><ol><li>添加厂商配置</li><li>添加 Chat 模型</li><li>创建并发布智能体</li><li>开始流式对话</li></ol></div>
+          <div class="sidebar-note"><b>验收顺序</b><ol><li>添加厂商配置</li><li>添加 Chat 模型</li><li>登记并测试天气工具</li><li>关联工具后发布智能体</li><li>开始流式对话</li></ol></div>
         </aside>
 
         <div class="workspace">
@@ -74,6 +75,13 @@
             <div class="page-head"><div><p class="eyebrow">MODEL REGISTRY</p><h1>模型管理</h1><p>将具体模型绑定到当前用户自己的厂商配置。</p></div><button class="button primary" data-open-modal="model">+ 添加模型</button></div>
             <div class="toolbar card"><select id="modelProviderFilter"><option value="">全部厂商配置</option></select><select id="modelTypeFilter"><option value="">全部类型</option><option value="chat">chat</option><option value="embedding">embedding</option><option value="vision">vision</option></select><button class="button ghost small" id="modelSearchBtn">查询</button></div>
             <div class="table-card card"><div class="table-wrap"><table><thead><tr><th>显示名称</th><th>模型标识</th><th>所属配置</th><th>类型</th><th>状态</th><th></th></tr></thead><tbody id="modelList"></tbody></table></div><div class="empty hidden" id="modelEmpty">暂无模型。先添加厂商配置。</div></div>
+          </section>
+
+          <section class="route-page hidden" id="route-tools">
+            <div class="page-head"><div><p class="eyebrow">TOOL REGISTRY</p><h1>工具管理</h1><p>登记系统工具或 MCP 工具，测试后关联到智能体。</p></div><button class="button primary" data-open-modal="tool">+ 添加工具</button></div>
+            <div class="toolbar card"><label class="inline-input">⌕ <input id="toolSearch" placeholder="按名称搜索"></label><select id="toolTypeFilter"><option value="">全部类型</option><option value="system">system</option><option value="mcp">mcp</option></select><button class="button ghost small" id="toolSearchBtn">查询</button></div>
+            <div class="notice">天气工具的注册名是 <code>get_weather</code>。高德 Key 配置在 <code>app/etc/config.yml</code> 的 <code>weather.apiKey</code>。</div>
+            <div class="table-card card"><div class="table-wrap"><table><thead><tr><th>名称</th><th>类型</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody id="toolList"></tbody></table></div><div class="empty hidden" id="toolEmpty">暂无工具。</div></div>
           </section>
 
           <section class="route-page hidden" id="route-chat">

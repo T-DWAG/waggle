@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>05 智能体工具集成 · 串联脑图</title>
+  <style>
+    :root { --ink:#172329; --muted:#5d727a; --line:#d5e1e4; --paper:#f6f8f8; --card:#fff; --teal:#0f766e; --teal-soft:#e7f6f3; --blue:#1d4e89; --blue-soft:#e8f1fb; --amber:#8a5a00; --amber-soft:#fff4dc; --red:#8f2d2d; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:15px/1.6 "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+    header { padding:28px 32px 18px; border-bottom:1px solid var(--line); background:#fff; }
+    h1 { margin:0; font-size:28px; letter-spacing:-.04em; } h1 b { color:var(--teal); }
+    header p { max-width:920px; margin:8px 0 0; color:var(--muted); }
+    main { width:min(1180px,calc(100% - 36px)); margin:0 auto; padding:22px 0 48px; }
+    h2 { margin:28px 0 10px; font-size:18px; }
+    .key { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:16px; }
+    .key span,.chip { padding:6px 10px; border:1px solid #b7ddd7; border-radius:999px; background:var(--teal-soft); color:#0d4f49; font-family:Consolas,ui-monospace,monospace; font-size:13px; }
+    .key i { color:var(--teal); font-style:normal; font-weight:800; }
+    .chain { display:grid; gap:0; }
+    .row { display:grid; grid-template-columns:74px minmax(0,1fr); }
+    .rail { position:relative; } .rail:before { content:""; position:absolute; left:27px; top:0; bottom:0; width:2px; background:#b9d8d3; }
+    .row:first-child .rail:before { top:24px; } .row:last-child .rail:before { bottom:auto; height:24px; }
+    .dot { position:absolute; z-index:1; left:16px; top:18px; width:24px; height:24px; border-radius:50%; display:grid; place-items:center; color:#fff; background:var(--teal); font-size:12px; font-weight:800; }
+    .card { margin:0 0 12px; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+    .card h3 { margin:0 0 6px; font-size:16px; } .card p { margin:0; }
+    .io { display:grid; grid-template-columns:1fr 28px 1fr; gap:8px; align-items:stretch; margin-top:10px; }
+    .box { padding:8px 10px; border-radius:8px; background:#f3f7f8; } .box b,.arrow b { display:block; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.04em; }
+    .arrow { display:grid; place-items:center; color:var(--teal); font-weight:800; }
+    code { padding:1px 5px; border-radius:4px; background:#eef3f4; font-family:Consolas,ui-monospace,monospace; font-size:.92em; }
+    .loop { margin-top:10px; padding:10px 12px; border-left:3px solid var(--blue); background:var(--blue-soft); }
+    .warn { margin-top:10px; padding:10px 12px; border-left:3px solid var(--amber); background:var(--amber-soft); }
+    .split { display:grid; grid-template-columns:1.2fr .8fr; gap:14px; }
+    table { width:100%; border-collapse:collapse; background:#fff; } th,td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { color:var(--muted); font-size:12px; }
+    .map { padding:16px; border:1px solid var(--line); border-radius:12px; background:#fff; overflow:auto; }
+    svg { display:block; width:100%; height:auto; } text { font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+    ol { margin:8px 0 0; padding-left:20px; } li + li { margin-top:4px; }
+    @media (max-width:760px) { .io,.split { grid-template-columns:1fr; } .arrow { transform:rotate(90deg); } header,main { padding-left:16px; padding-right:16px; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1><b>05</b> 智能体工具集成 · 串联关系</h1>
+  <p>数据库只保存“叫什么”，进程注册表才保存“怎么执行”。两边用同一个工具名接上，会话时再把数据库记录还原成可调用对象。</p>
+  <div class="key"><span>Registry["get_weather"]</span><i>=</i><span>tools.name</span><i>=</i><span>ToolCall.function.name</span></div>
+</header>
+<main>
+  <section class="map" aria-label="总关系图">
+    <svg viewBox="0 0 1080 430" role="img">
+      <defs>
+        <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#0f766e"/></marker>
+      </defs>
+      <rect x="40" y="40" width="250" height="78" rx="10" fill="#e7f6f3" stroke="#0f766e"/>
+      <text x="165" y="70" text-anchor="middle" font-size="15" font-weight="700">1. 启动注册</text>
+      <text x="165" y="94" text-anchor="middle" font-size="12" fill="#5d727a">config → WeatherTool → Registry</text>
+      <rect x="415" y="40" width="250" height="78" rx="10" fill="#fff" stroke="#1d4e89"/>
+      <text x="540" y="70" text-anchor="middle" font-size="15" font-weight="700">2. 登记工具</text>
+      <text x="540" y="94" text-anchor="middle" font-size="12" fill="#5d727a">FindTool → 写入 tools</text>
+      <rect x="790" y="40" width="250" height="78" rx="10" fill="#fff" stroke="#1d4e89"/>
+      <text x="915" y="70" text-anchor="middle" font-size="15" font-weight="700">3. 绑定智能体</text>
+      <text x="915" y="94" text-anchor="middle" font-size="12" fill="#5d727a">tools.id → agent_tools</text>
+      <rect x="415" y="250" width="250" height="92" rx="10" fill="#fff" stroke="#8a5a00"/>
+      <text x="540" y="282" text-anchor="middle" font-size="15" font-weight="700">4. 会话还原</text>
+      <text x="540" y="306" text-anchor="middle" font-size="12" fill="#5d727a">agent_tools → tools.name</text>
+      <text x="540" y="324" text-anchor="middle" font-size="12" fill="#5d727a">name → Registry 里的函数</text>
+      <rect x="40" y="250" width="250" height="92" rx="10" fill="#e8f1fb" stroke="#1d4e89"/>
+      <text x="165" y="286" text-anchor="middle" font-size="15" font-weight="700">5. 模型决策</text>
+      <text x="165" y="310" text-anchor="middle" font-size="12" fill="#5d727a">WithTools + Prompt</text>
+      <text x="165" y="328" text-anchor="middle" font-size="12" fill="#5d727a">返回 ToolCall JSON</text>
+      <rect x="790" y="250" width="250" height="92" rx="10" fill="#fff4dc" stroke="#8a5a00"/>
+      <text x="915" y="286" text-anchor="middle" font-size="15" font-weight="700">6. 执行并回填</text>
+      <text x="915" y="310" text-anchor="middle" font-size="12" fill="#5d727a">InvokableRun → 高德</text>
+      <text x="915" y="328" text-anchor="middle" font-size="12" fill="#5d727a">ToolMessage → 再问模型</text>
+      <path d="M290 79 H415" stroke="#0f766e" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M665 79 H790" stroke="#0f766e" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M915 118 V188 H540 V250" fill="none" stroke="#0f766e" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M415 296 H290" stroke="#0f766e" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M165 250 V170 H165" fill="none" stroke="#0f766e" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+      <path d="M290 296 H760 V296" fill="none" stroke="#8a5a00" stroke-width="2" marker-end="url(#ah)"/>
+      <text x="350" y="66" font-size="12" fill="#0f766e">校验名字</text>
+      <text x="700" y="66" font-size="12" fill="#0f766e">只传 ID</text>
+      <text x="620" y="176" font-size="12" fill="#0f766e">预加载关联</text>
+      <text x="48" y="168" font-size="12" fill="#0f766e">按名字找回</text>
+      <text x="500" y="286" font-size="12" fill="#8a5a00">参数 JSON</text>
+    </svg>
+  </section>
+
+  <h2>主链：上一步的产出就是下一步的输入</h2>
+  <div class="chain">
+    <article class="row"><div class="rail"><div class="dot">1</div></div><div class="card"><h3>启动时，函数进入内存</h3><p><code>inits.Init</code> 调用 <code>tools.RegisterBuiltins</code>，读取 <code>weather.apiKey</code>，构造 <code>WeatherTool</code> 并放进进程内 Registry。</p><div class="io"><div class="box"><b>输入</b>配置中的高德 Key</div><div class="arrow">→</div><div class="box"><b>输出</b>可通过 <code>get_weather</code> 找到的 <code>InvokeParamTool</code></div></div><div class="warn">Key 只存在这个内存对象里。数据库和接口响应都不会保存它。</div></div></article>
+    <article class="row"><div class="rail"><div class="dot">2</div></div><div class="card"><h3>登记时，用名字从内存取契约，再写入数据库</h3><p><code>POST /api/v1/tools</code> 收到 <code>name=get_weather</code> 后调用 <code>FindTool</code>。找不到就返回 3003，不会凭请求正文造一个工具。</p><div class="io"><div class="box"><b>从注册表取</b><code>Info.Name</code>、<code>Info.Desc</code>、<code>Params()</code></div><div class="arrow">→</div><div class="box"><b>写入 tools</b>name、description、parameters_schema、creator_id</div></div><p>因此系统工具的中文展示名不能作为查找键，注册名必须和代码一致。</p></div></article>
+    <article class="row"><div class="rail"><div class="dot">3</div></div><div class="card"><h3>绑定时，只保存关系，不复制函数</h3><p><code>POST /api/v1/agents/{id}/tools/batch</code> 先确认智能体属于当前用户，再通过 <code>getToolsInIds</code> 事件取出工具并核对创建者。</p><div class="io"><div class="box"><b>输入</b>工具 UUID 列表</div><div class="arrow">→</div><div class="box"><b>输出</b>清空该智能体旧关联后，重建 <code>agent_tools</code></div></div><p>关联记录只有 <code>agent_id</code>、<code>tool_id</code>、<code>status=enabled</code>。工具定义仍留在 <code>tools</code>。</p></div></article>
+    <article class="row"><div class="rail"><div class="dot">4</div></div><div class="card"><h3>会话加载时，关系被还原成注册表对象</h3><p><code>GetAgentWithTools</code> 预加载关联工具。对每条启用的 system 记录，用它的 <code>name</code> 回到第 1 步的 Registry。</p><div class="io"><div class="box"><b>数据库给出</b><code>tools.name = get_weather</code></div><div class="arrow">→</div><div class="box"><b>注册表交回</b>同一个可执行的 <code>WeatherTool</code></div></div><div class="warn">名称对不上时不会报错中断对话，只记录警告并跳过该工具。所以第 2 步必须保存注册名。</div></div></article>
+    <article class="row"><div class="rail"><div class="dot">5</div></div><div class="card"><h3>模型同时拿到两份描述，但只有一份能真正发调用</h3><div class="io"><div class="box"><b>协议绑定</b><code>chatModel.WithTools(ToolInfo)</code>，模型据此生成结构化 ToolCall</div><div class="arrow">+</div><div class="box"><b>文字提示</b><code>BaseSystemPrompt</code> 的 <code>{toolsInfo}</code>，说明何时使用</div></div><p>三家厂商适配器都返回 <code>ToolCallingChatModel</code>，所以绑定发生在同一次对话模型上。没有关联工具时，这一步退回原来的直接流式回答。</p></div></article>
+    <article class="row"><div class="rail"><div class="dot">6</div></div><div class="card"><h3>调用闭环：模型给出参数，工具返回文本，模型继续回答</h3><div class="loop"><code>Stream</code> 得到完整消息；若有 ToolCall，就按 <code>function.name</code> 找到第 4 步还原的对象，执行 <code>InvokableRun(arguments)</code>。高德返回的 JSON 字符串被放进 <code>ToolMessage(content, call.ID)</code>，追加到消息后再次请求模型。没有 ToolCall 或达到 4 轮时停止。</div><div class="io"><div class="box"><b>模型 → 工具</b><code>{"city":"北京","extensions":"base"}</code></div><div class="arrow">→</div><div class="box"><b>工具 → 模型</b>高德响应原文；失败时是错误文本，不是抛出给前端中断</div></div></div></article>
+  </div>
+
+  <h2>测试是主链的短路</h2>
+  <div class="card"><p><code>POST /api/v1/tools/{id}/test</code> 不经过智能体和模型：当前用户的 tools 记录 → 检查启用 → <code>FindTool(name)</code> → 同一个 <code>InvokableRun</code>。它验证的是第 1 步和第 2 步已经接上，不验证第 3 步的智能体关联。</p></div>
+
+  <div class="split">
+    <section>
+      <h2>每一跳保存什么</h2>
+      <table>
+        <tr><th>位置</th><th>保存</th><th>不保存</th></tr>
+        <tr><td>Registry</td><td>函数、参数定义、高德 Key</td><td>用户、智能体关系</td></tr>
+        <tr><td>tools</td><td>注册名、描述、参数 schema、所有者</td><td>函数和 Key</td></tr>
+        <tr><td>agent_tools</td><td>agent 与 tool 的 ID 关系</td><td>工具定义副本</td></tr>
+        <tr><td>本次请求消息</td><td>ToolCall 与 ToolMessage</td><td>下次请求看不到本次结果</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>断点</h2>
+      <ol>
+        <li>Key 为空：链路可登记，但第 6 步调用失败。</li>
+        <li>MCP 只有配置入库，<code>buildTools</code> 会跳过，测试也不会发起请求。</li>
+        <li>关联替换先删后插，两次写库没有事务。</li>
+        <li>对话没有会话存储，工具结果不跨 HTTP 请求保留。</li>
+      </ol>
+    </section>
+  </div>
+</main>
+</body>
+</html>

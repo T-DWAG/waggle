@@ -33,6 +33,10 @@ type Repository interface {
 	UpdateLLM(ctx context.Context, llm *model.LLM) error
 	DeleteLLM(ctx context.Context, id, userID uuid.UUID) error
 	GetActiveLLMByProviderAndName(ctx context.Context, userID uuid.UUID, provider, modelName string) (*model.LLM, error)
+
+	GetAgentWithTools(ctx context.Context, id, creatorID uuid.UUID) (*model.Agent, error)
+	DeleteAgentTools(ctx context.Context, agentID uuid.UUID) error
+	CreateAgentTools(ctx context.Context, agentTools []model.AgentTool) error
 }
 
 type Model struct {
@@ -275,6 +279,29 @@ func (m *Model) UpdateLLM(ctx context.Context, llm *model.LLM) error {
 
 func (m *Model) DeleteLLM(ctx context.Context, id, userID uuid.UUID) error {
 	return m.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&model.LLM{}).Error
+}
+
+func (m *Model) GetAgentWithTools(ctx context.Context, id, creatorID uuid.UUID) (*model.Agent, error) {
+	var agent model.Agent
+	err := m.db.WithContext(ctx).
+		Preload("Tools").
+		Where("id = ? AND creator_id = ?", id, creatorID).
+		First(&agent).Error
+	if recordNotFound(err) {
+		return nil, nil
+	}
+	return &agent, err
+}
+
+func (m *Model) DeleteAgentTools(ctx context.Context, agentID uuid.UUID) error {
+	return m.db.WithContext(ctx).Where("agent_id = ?", agentID).Delete(&model.AgentTool{}).Error
+}
+
+func (m *Model) CreateAgentTools(ctx context.Context, agentTools []model.AgentTool) error {
+	if len(agentTools) == 0 {
+		return nil
+	}
+	return m.db.WithContext(ctx).CreateInBatches(&agentTools, len(agentTools)).Error
 }
 
 func (m *Model) GetActiveLLMByProviderAndName(ctx context.Context, userID uuid.UUID, provider, modelName string) (*model.LLM, error) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"app/internal/agents"
+	"app/internal/tools"
 	"model/shared"
 
 	"github.com/mszlu521/thunder/event"
@@ -36,4 +37,5 @@ func (*Event) Register() {
 		}
 		return &shared.ModelProviderResponse{ProvideConfig: cfg}, nil
 	})
+	event.Register("getToolsInIds", tools.NewPublicService().GetToolsInIds)
 }

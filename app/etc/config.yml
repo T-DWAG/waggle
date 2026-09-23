@@ -39,6 +39,9 @@ email:
   password: "zjunfdprdsmwebdb"
   from: "2636858254@qq.com"
   baseUrl: "http://127.0.0.1:8888"
+weather:
+  apiKey: "" # 高德 Web 服务 Key；为空时天气工具可登记，但测试和对话会返回未配置错误
+
 auth:
   isAuth: true # 本章的真正入口：打开后所有接口都要 token
   ignores: # 跳过鉴权：这些路径不需要 token

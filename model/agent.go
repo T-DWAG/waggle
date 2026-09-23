@@ -55,6 +55,8 @@ type Agent struct {
 	InvocationCount uint64 `json:"invocationCount" gorm:"column:invocation_count;type:bigint;not null;default:0"`
 	// PublishedAt 发布时间戳
 	PublishedAt *time.Time `json:"publishedAt" gorm:"column:published_at;type:timestamptz"`
+
+	Tools []Tool `json:"tools,omitempty" gorm:"many2many:agent_tools;"`
 }
 
 // TableName 返回表名

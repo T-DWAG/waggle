@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 
 	"common/biz"
 	"core"
+	"core/ai"
+	"core/tools"
 	"model"
 	"model/shared"
 
@@ -17,6 +20,7 @@ import (
 	openaiModel "github.com/cloudwego/eino-ext/components/model/openai"
 	qwenModel "github.com/cloudwego/eino-ext/components/model/qwen"
 	einoModel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"github.com/mszlu521/thunder/errs"
@@ -81,7 +85,7 @@ func (s *Service) CreateAgent(parent context.Context, request CreateAgentRequest
 func (s *Service) GetAgent(parent context.Context, id, userID uuid.UUID) (*model.Agent, error) {
 	ctx, cancel := context.WithTimeout(parent, databaseTimeout)
 	defer cancel()
-	agent, err := s.repo.GetAgentByIDAndCreator(ctx, id, userID)
+	agent, err := s.repo.GetAgentWithTools(ctx, id, userID)
 	if err != nil {
 		logs.Errorf("get agent: %v", err)
 		return nil, errs.DBError
@@ -420,6 +424,75 @@ func (s *Service) UpdateLLM(parent context.Context, id, userID uuid.UUID, reques
 	return nil
 }
 
+func (s *Service) UpdateAgentTools(parent context.Context, userID, agentID uuid.UUID, request *ToolsRequest) ([]model.AgentTool, error) {
+	ctx, cancel := context.WithTimeout(parent, databaseTimeout)
+	defer cancel()
+	agent, err := s.repo.GetAgentByIDAndCreator(ctx, agentID, userID)
+	if err != nil {
+		logs.Errorf("get agent for tool association: %v", err)
+		return nil, errs.DBError
+	}
+	if agent == nil {
+		return nil, biz.ErrAgentNotFound
+	}
+
+	ids := make([]uuid.UUID, 0, len(request.Tools))
+	seen := make(map[uuid.UUID]struct{}, len(request.Tools))
+	for _, item := range request.Tools {
+		if item.ID == uuid.Nil {
+			return nil, errs.ErrParam
+		}
+		if _, exists := seen[item.ID]; exists {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		ids = append(ids, item.ID)
+	}
+	resolved, err := s.getToolsByIDs(ids)
+	if err != nil {
+		logs.Errorf("get tools for association: %v", err)
+		return nil, errs.DBError
+	}
+	if len(resolved) != len(ids) {
+		return nil, biz.ErrToolNotExist
+	}
+
+	if err := s.repo.DeleteAgentTools(ctx, agentID); err != nil {
+		logs.Errorf("delete agent tools: %v", err)
+		return nil, errs.DBError
+	}
+	agentTools := make([]model.AgentTool, 0, len(resolved))
+	now := time.Now()
+	for _, item := range resolved {
+		if item.CreatorID != userID {
+			return nil, biz.ErrToolNotExist
+		}
+		agentTools = append(agentTools, model.AgentTool{
+			AgentID: agentID, ToolID: item.ID, Status: model.Enabled, CreatedAt: now,
+		})
+	}
+	if err := s.repo.CreateAgentTools(ctx, agentTools); err != nil {
+		logs.Errorf("create agent tools: %v", err)
+		return nil, errs.DBError
+	}
+	return agentTools, nil
+}
+
+func (s *Service) getToolsByIDs(ids []uuid.UUID) ([]*model.Tool, error) {
+	if len(ids) == 0 {
+		return []*model.Tool{}, nil
+	}
+	result, err := event.Trigger("getToolsInIds", &shared.ToolsReq{Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	tools, ok := result.([]*model.Tool)
+	if !ok {
+		return nil, fmt.Errorf("unexpected tools event response: %T", result)
+	}
+	return tools, nil
+}
+
 func (s *Service) DeleteLLM(parent context.Context, id, userID uuid.UUID) error {
 	ctx, cancel := context.WithTimeout(parent, databaseTimeout)
 	defer cancel()
@@ -438,9 +511,8 @@ func (s *Service) DeleteLLM(parent context.Context, id, userID uuid.UUID) error 
 	return nil
 }
 
-// AgentMessageStream uses Eino's base chat-model streaming API. A direct model
-// stream is sufficient for the current basic-chat chapter and keeps later tool
-// orchestration independent from this transport layer.
+// AgentMessageStream 在模型返回工具调用时执行已关联工具，再把工具结果交回模型。
+// 没有关联工具时保持原来的单次流式回答。
 func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, request ChatRequest) (<-chan string, <-chan error) {
 	dataChan := make(chan string, 32)
 	errorChan := make(chan error, 1)
@@ -454,9 +526,14 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 			close(errorChan)
 		}()
 
-		agent, err := s.GetAgent(ctx, request.AgentID, userID)
+		agent, err := s.repo.GetAgentWithTools(ctx, request.AgentID, userID)
 		if err != nil {
-			sendError(ctx, errorChan, err)
+			logs.Errorf("get agent with tools: %v", err)
+			sendError(ctx, errorChan, errs.DBError)
+			return
+		}
+		if agent == nil {
+			sendError(ctx, errorChan, biz.ErrAgentNotFound)
 			return
 		}
 		if agent.Status != model.Published {
@@ -497,36 +574,56 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 			sendError(ctx, errorChan, biz.ErrUnsupportedProvider)
 			return
 		}
-		messages := make([]*schema.Message, 0, 2)
-		if agent.SystemPrompt != "" {
-			messages = append(messages, schema.SystemMessage(agent.SystemPrompt))
-		}
-		messages = append(messages, schema.UserMessage(request.Message))
-		stream, err := chatModel.Stream(ctx, messages)
-		if err != nil {
-			logs.Errorf("start model stream: %v", err)
-			sendError(ctx, errorChan, errors.New("模型调用失败"))
-			return
-		}
-		defer stream.Close()
-		for {
-			message, err := stream.Recv()
-			if err == io.EOF {
+		agentTools := buildTools(agent)
+		if len(agentTools) > 0 {
+			toolInfos := make([]*schema.ToolInfo, 0, len(agentTools))
+			for _, item := range agentTools {
+				info, infoErr := item.Info(ctx)
+				if infoErr != nil {
+					logs.Errorf("load tool info: %v", infoErr)
+					continue
+				}
+				toolInfos = append(toolInfos, info)
+			}
+			chatModel, err = chatModel.WithTools(toolInfos)
+			if err != nil {
+				logs.Errorf("bind tools: %v", err)
+				sendError(ctx, errorChan, errors.New("工具绑定失败"))
 				return
 			}
+		}
+
+		messages := []*schema.Message{schema.SystemMessage(buildSystemPrompt(agent, agentTools)), schema.UserMessage(request.Message)}
+		const maxToolRounds = 4
+		for round := 0; ; round++ {
+			stream, err := chatModel.Stream(ctx, messages)
+			if err != nil {
+				logs.Errorf("start model stream: %v", err)
+				sendError(ctx, errorChan, errors.New("模型调用失败"))
+				return
+			}
+			message, err := forwardStream(ctx, stream, dataChan, agent.Name)
+			stream.Close()
 			if err != nil {
 				logs.Errorf("receive model stream: %v", err)
 				sendError(ctx, errorChan, errors.New("模型流式响应失败"))
 				return
 			}
-			if message == nil {
-				continue
+			if message == nil || len(message.ToolCalls) == 0 || round == maxToolRounds {
+				return
 			}
-			if message.ReasoningContent != "" {
-				sendData(ctx, dataChan, core.BuildReasoningMessage(agent.Name, message.ToolName, message.ReasoningContent))
-			}
-			if message.Content != "" {
-				sendData(ctx, dataChan, core.BuildContentMessage(agent.Name, message.ToolName, message.Content))
+
+			messages = append(messages, message)
+			for _, call := range message.ToolCalls {
+				result, callErr := invokeAgentTool(ctx, agentTools, call)
+				if callErr != nil {
+					logs.Errorf("invoke tool %s: %v", call.Function.Name, callErr)
+					result = "工具执行失败: " + callErr.Error()
+					sendData(ctx, dataChan, core.BuildErrMessage(agent.Name, result))
+				} else {
+					sendData(ctx, dataChan, core.BuildContentMessage(agent.Name, call.Function.Name, "已调用工具 "+call.Function.Name))
+				}
+				messages = append(messages, schema.ToolMessage(result, call.ID))
 			}
 		}
 	}()
@@ -548,7 +645,7 @@ func (s *Service) validatePublishedAgent(ctx context.Context, agent *model.Agent
 	return nil
 }
 
-func buildChatModel(ctx context.Context, agent *model.Agent, config *model.ProviderConfig) (einoModel.BaseChatModel, error) {
+func buildChatModel(ctx context.Context, agent *model.Agent, config *model.ProviderConfig) (einoModel.ToolCallingChatModel, error) {
 	params := agent.ModelParameters.ToModelParams()
 	var (
 		maxTokens   *int
@@ -586,6 +683,107 @@ func buildChatModel(ctx context.Context, agent *model.Agent, config *model.Provi
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", config.Provider)
 	}
+}
+
+func buildTools(agent *model.Agent) []tool.BaseTool {
+	agentTools := make([]tool.BaseTool, 0, len(agent.Tools))
+	for _, item := range agent.Tools {
+		if !item.IsEnable {
+			continue
+		}
+		switch item.ToolType {
+		case model.SystemToolType:
+			if systemTool := tools.FindTool(item.Name); systemTool != nil {
+				agentTools = append(agentTools, systemTool)
+			} else {
+				logs.Warnf("system tool %s is not registered", item.Name)
+			}
+		default:
+			logs.Warnf("unsupported tool type %s", item.ToolType)
+		}
+	}
+	return agentTools
+}
+
+func buildSystemPrompt(agent *model.Agent, agentTools []tool.BaseTool) string {
+	toolsInfo := "当前没有可用工具。"
+	if len(agentTools) > 0 {
+		toolsInfo = formatToolsDescription(agentTools)
+	}
+	prompt := strings.NewReplacer(
+		"{role}", agent.SystemPrompt,
+		"{ragContext}", "",
+		"{toolsInfo}", toolsInfo,
+		"{agentsInfo}", "",
+	).Replace(ai.BaseSystemPrompt)
+	return strings.TrimSpace(prompt)
+}
+
+func formatToolsDescription(agentTools []tool.BaseTool) string {
+	var builder strings.Builder
+	builder.WriteString("【可用工具列表】\n")
+	for _, item := range agentTools {
+		info, err := item.Info(context.Background())
+		if err != nil || info == nil {
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("- name: `%s`\n", info.Name))
+		builder.WriteString(fmt.Sprintf("  description: %q\n", info.Desc))
+		if info.ParamsOneOf != nil {
+			if params, err := info.ParamsOneOf.ToJSONSchema(); err == nil && params != nil {
+				encoded, _ := json.Marshal(params)
+				builder.WriteString(fmt.Sprintf("  parameters: %s\n", encoded))
+			}
+		}
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+func forwardStream(ctx context.Context, stream *schema.StreamReader[*schema.Message], output chan<- string, agentName string) (*schema.Message, error) {
+	chunks := make([]*schema.Message, 0, 8)
+	for {
+		message, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if message == nil {
+			continue
+		}
+		chunks = append(chunks, message)
+		if message.ReasoningContent != "" {
+			sendData(ctx, output, core.BuildReasoningMessage(agentName, message.ToolName, message.ReasoningContent))
+		}
+		if message.Content != "" {
+			sendData(ctx, output, core.BuildContentMessage(agentName, message.ToolName, message.Content))
+		}
+	}
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	return schema.ConcatMessages(chunks)
+}
+
+func invokeAgentTool(ctx context.Context, agentTools []tool.BaseTool, call schema.ToolCall) (string, error) {
+	for _, item := range agentTools {
+		info, err := item.Info(ctx)
+		if err != nil || info == nil || info.Name != call.Function.Name {
+			continue
+		}
+		invokable, ok := item.(tool.InvokableTool)
+		if !ok {
+			return "", fmt.Errorf("tool %s is not invokable", info.Name)
+		}
+		arguments := call.Function.Arguments
+		if strings.TrimSpace(arguments) == "" {
+			arguments = "{}"
+		}
+		return invokable.InvokableRun(ctx, arguments)
+	}
+	return "", fmt.Errorf("tool %s is not associated with this agent", call.Function.Name)
 }
 
 func sendData(ctx context.Context, output chan<- string, data string) {

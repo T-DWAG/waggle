@@ -296,6 +296,27 @@ func (h *Handler) DeleteLLM(c *gin.Context) {
 	res.Success(c, &SuccessResponse{Success: true})
 }
 
+func (h *Handler) UpdateAgentTools(c *gin.Context) {
+	var request ToolsRequest
+	var agentID uuid.UUID
+	if err := req.Path(c, "id", &agentID); err != nil {
+		return
+	}
+	if err := req.JsonParam(c, &request); err != nil {
+		return
+	}
+	userID, ok := req.GetUserIdUUID(c)
+	if !ok {
+		return
+	}
+	response, err := h.service.UpdateAgentTools(c.Request.Context(), userID, agentID, &request)
+	if err != nil {
+		res.Error(c, err)
+		return
+	}
+	res.Success(c, response)
+}
+
 func (h *Handler) AgentMessage(c *gin.Context) {
 	var request ChatRequest
 	if err := req.JsonParam(c, &request); err != nil {

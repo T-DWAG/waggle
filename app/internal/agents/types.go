@@ -76,6 +76,15 @@ type ChatRequest struct {
 	SessionID *uuid.UUID `json:"sessionId,omitempty"`
 }
 
+type ToolsRequest struct {
+	Tools []ToolItem `json:"tools" binding:"required"`
+}
+
+type ToolItem struct {
+	ID   uuid.UUID `json:"id" binding:"required"`
+	Type string    `json:"type" binding:"required"`
+}
+
 type ListAgentResponse struct {
 	Agents []*model.Agent `json:"agents"`
 	Total  int64          `json:"total"`
