@@ -9,7 +9,8 @@ import (
 
 func main() {
 	//1. 加载配置  默认是 etc/config.yml
-	config.Init()
+	// thunder 的 Init 只返回 viper 实例，需显式设置后 config.GetString 等自定义配置读取才可用。
+	config.SetViper(config.Init())
 	conf := config.GetConfig()
 	//2. 加载日志
 	logs.Init(conf.Log)

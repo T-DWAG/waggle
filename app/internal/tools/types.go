@@ -51,7 +51,14 @@ type toolFilter struct {
 }
 
 type TestToolRequest struct {
-	Params map[string]any `json:"params"`
+	ToolName string         `json:"toolName"`
+	Params   map[string]any `json:"params"`
+}
+
+type McpToolResponse struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	InputSchema model.JSON `json:"inputSchema"`
 }
 
 type TestToolResponse struct {

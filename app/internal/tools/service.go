@@ -3,13 +3,17 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"common/biz"
-	"core/tools"
+	coretools "core/tools"
 	"model"
 	"model/shared"
+
+	toolpkg "github.com/cloudwego/eino/components/tool"
 
 	"github.com/google/uuid"
 	"github.com/mszlu521/thunder/errs"
@@ -60,10 +64,13 @@ func (s *service) createTool(parent context.Context, userID uuid.UUID, request *
 		if request.McpConfig == nil || strings.TrimSpace(request.McpConfig.Url) == "" {
 			return nil, biz.ErrMcpConfigRequired
 		}
+		if err := validateMcpConfig(request.McpConfig); err != nil {
+			return nil, errs.ErrParam
+		}
 		tool.McpConfig = request.McpConfig
 	} else {
 		// 系统工具的真实名称、描述和参数以注册表为准，避免前端展示名和模型调用名不一致。
-		registered := tools.FindTool(name)
+		registered := coretools.FindTool(name)
 		if registered == nil {
 			return nil, biz.ErrToolNotRegistered
 		}
@@ -131,8 +138,11 @@ func (s *service) updateTool(parent context.Context, userID, id uuid.UUID, reque
 			tool.ParametersSchema = *request.ParametersSchema
 		}
 		if request.McpConfig != nil {
-			if strings.TrimSpace(request.McpConfig.Url) == "" {
-				return nil, biz.ErrMcpConfigRequired
+			if err := validateMcpConfig(request.McpConfig); err != nil {
+				return nil, errs.ErrParam
+			}
+			if request.McpConfig.Token == "" && tool.McpConfig != nil {
+				request.McpConfig.Token = tool.McpConfig.Token
 			}
 			tool.McpConfig = request.McpConfig
 		}
@@ -230,11 +240,59 @@ func (s *service) testTool(parent context.Context, userID, id uuid.UUID, request
 	if !tool.IsEnable {
 		return nil, biz.ErrToolDisabled
 	}
+	if tool.ToolType == model.McpToolType {
+		if tool.McpConfig == nil {
+			return &TestToolResponse{Success: false, Message: "MCP 配置为空"}, nil
+		}
+		if strings.TrimSpace(request.ToolName) == "" {
+			return nil, errs.ErrParam
+		}
+		config := &coretools.McpConfig{
+			URL:            tool.McpConfig.Url,
+			Type:           tool.McpConfig.Type,
+			Token:          tool.McpConfig.Token,
+			CredentialType: tool.McpConfig.CredentialType,
+			ClientName:     "agent-platform",
+			ClientVersion:  "1.0.0",
+		}
+		remoteTools, cli, err := coretools.GetMCPTools(ctx, config)
+		if err != nil {
+			logs.Errorf("MCP 工具测试连接失败, toolId=%s: %v", id, err)
+			return &TestToolResponse{Success: false, Message: "MCP 工具连接失败"}, nil
+		}
+		defer cli.Close()
+		var remoteTool toolpkg.BaseTool
+		for _, item := range remoteTools {
+			info, infoErr := item.Info(ctx)
+			if infoErr == nil && info != nil && info.Name == request.ToolName {
+				remoteTool = item
+				break
+			}
+		}
+		if remoteTool == nil {
+			return &TestToolResponse{Success: false, Message: "MCP 工具不存在"}, nil
+		}
+		invokable, ok := remoteTool.(toolpkg.InvokableTool)
+		if !ok {
+			return &TestToolResponse{Success: false, Message: "MCP 工具不可执行"}, nil
+		}
+		params, err := json.Marshal(request.Params)
+		if err != nil {
+			return nil, errs.ErrParam
+		}
+		result, err := invokable.InvokableRun(ctx, string(params))
+		if err != nil {
+			// 调用阶段的错误来自远端工具（如参数校验失败），不含 Token，返回给工具所有者便于排查。
+			logs.Errorf("MCP 工具测试执行失败, toolId=%s, toolName=%s: %v", id, request.ToolName, err)
+			return &TestToolResponse{Success: false, Message: "MCP 工具执行失败: " + err.Error()}, nil
+		}
+		return &TestToolResponse{Success: true, Message: "success", Data: result}, nil
+	}
 	if tool.ToolType != model.SystemToolType {
-		return &TestToolResponse{Success: false, Message: "MCP 工具调用将在后续章节接入"}, nil
+		return nil, biz.ErrInvalidToolType
 	}
 
-	registered := tools.FindTool(tool.Name)
+	registered := coretools.FindTool(tool.Name)
 	if registered == nil {
 		return nil, biz.ErrToolNotRegistered
 	}
@@ -250,13 +308,84 @@ func (s *service) testTool(parent context.Context, userID, id uuid.UUID, request
 	return &TestToolResponse{Success: true, Message: "success", Data: result}, nil
 }
 
+func (s *service) getMcpTools(parent context.Context, userID, id uuid.UUID) ([]*McpToolResponse, error) {
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	stored, err := s.repo.get(ctx, id, userID)
+	if err != nil {
+		logs.Errorf("获取 MCP 工具配置失败: %v", err)
+		return nil, errs.DBError
+	}
+	if stored == nil {
+		return nil, biz.ErrToolNotExist
+	}
+	if stored.ToolType != model.McpToolType {
+		return nil, biz.ErrInvalidToolType
+	}
+	if !stored.IsEnable {
+		return nil, biz.ErrToolDisabled
+	}
+	if stored.McpConfig == nil {
+		return nil, biz.ErrMcpConfigRequired
+	}
+	config := &coretools.McpConfig{
+		URL:            stored.McpConfig.Url,
+		Type:           stored.McpConfig.Type,
+		Token:          stored.McpConfig.Token,
+		CredentialType: stored.McpConfig.CredentialType,
+		ClientName:     "agent-platform",
+		ClientVersion:  "1.0.0",
+	}
+	remoteTools, cli, err := coretools.ListMCPTools(ctx, config)
+	if err != nil {
+		// 只记录配置 ID，底层错误不回传前端，避免暴露内部地址或认证细节。
+		logs.Errorf("获取 MCP 工具失败, toolId=%s: %v", id, err)
+		return nil, biz.ErrMcpConnectFailed
+	}
+	defer cli.Close()
+	response := make([]*McpToolResponse, 0, len(remoteTools))
+	for _, remote := range remoteTools {
+		schemaBytes, err := json.Marshal(remote.InputSchema)
+		if err != nil {
+			return nil, fmt.Errorf("转换 MCP 工具参数失败: %w", err)
+		}
+		inputSchema := model.JSON{}
+		if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
+			return nil, fmt.Errorf("解析 MCP 工具参数失败: %w", err)
+		}
+		response = append(response, &McpToolResponse{
+			Name:        remote.Name,
+			Description: remote.Description,
+			InputSchema: inputSchema,
+		})
+	}
+	return response, nil
+}
+
+func validateMcpConfig(config *model.McpConfig) error {
+	if config == nil || strings.TrimSpace(config.Url) == "" {
+		return biz.ErrMcpConfigRequired
+	}
+	parsed, err := url.Parse(config.Url)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
+		return fmt.Errorf("invalid MCP URL")
+	}
+	if config.Type != "" && config.Type != "sse" && config.Type != "streamable_http" {
+		return fmt.Errorf("unsupported MCP transport type")
+	}
+	if config.CredentialType != "" && config.CredentialType != "bearer" {
+		return fmt.Errorf("unsupported MCP credential type")
+	}
+	return nil
+}
 func convertToolToResponse(tool *model.Tool) *ToolResponse {
 	config := model.JSON{}
 	if tool.McpConfig != nil {
-		encoded, err := json.Marshal(tool.McpConfig)
-		if err == nil {
-			_ = json.Unmarshal(encoded, &config)
-		}
+		config["type"] = tool.McpConfig.Type
+		config["url"] = tool.McpConfig.Url
+		config["authenticationRequired"] = tool.McpConfig.AuthenticationRequired
+		config["credentialType"] = tool.McpConfig.CredentialType
+		config["tokenConfigured"] = tool.McpConfig.Token != ""
 	}
 	return &ToolResponse{
 		ID:               tool.ID.String(),

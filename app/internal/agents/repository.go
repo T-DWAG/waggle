@@ -284,13 +284,32 @@ func (m *Model) DeleteLLM(ctx context.Context, id, userID uuid.UUID) error {
 func (m *Model) GetAgentWithTools(ctx context.Context, id, creatorID uuid.UUID) (*model.Agent, error) {
 	var agent model.Agent
 	err := m.db.WithContext(ctx).
-		Preload("Tools").
 		Where("id = ? AND creator_id = ?", id, creatorID).
 		First(&agent).Error
 	if recordNotFound(err) {
 		return nil, nil
 	}
-	return &agent, err
+	if err != nil {
+		return nil, err
+	}
+
+	var tools []*model.Tool
+	err = m.db.WithContext(ctx).
+		Model(&model.Tool{}).
+		Select("tools.*").
+		Joins("JOIN agent_tools ON agent_tools.tool_id = tools.id").
+		Where("agent_tools.agent_id = ? AND agent_tools.status = ?", id, model.Enabled).
+		Find(&tools).Error
+	if err != nil {
+		return nil, err
+	}
+	agent.Tools = make([]model.Tool, 0, len(tools))
+	for _, item := range tools {
+		if item != nil {
+			agent.Tools = append(agent.Tools, *item)
+		}
+	}
+	return &agent, nil
 }
 
 func (m *Model) DeleteAgentTools(ctx context.Context, agentID uuid.UUID) error {

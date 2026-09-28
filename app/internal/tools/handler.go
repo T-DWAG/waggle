@@ -103,6 +103,23 @@ func (h *handler) ListTools(c *gin.Context) {
 	res.Success(c, response)
 }
 
+func (h *handler) GetMcpTools(c *gin.Context) {
+	var id uuid.UUID
+	if err := req.Path(c, "mcpId", &id); err != nil {
+		return
+	}
+	userID, ok := req.GetUserIdUUID(c)
+	if !ok {
+		return
+	}
+	response, err := h.service.getMcpTools(c.Request.Context(), userID, id)
+	if err != nil {
+		res.Error(c, err)
+		return
+	}
+	res.Success(c, response)
+}
+
 func (h *handler) TestTool(c *gin.Context) {
 	id, ok := pathUUID(c)
 	if !ok {

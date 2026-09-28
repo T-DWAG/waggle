@@ -574,7 +574,12 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 			sendError(ctx, errorChan, biz.ErrUnsupportedProvider)
 			return
 		}
-		agentTools := buildTools(agent)
+		agentTools, cleanups := prepareAgentTools(ctx, agent)
+		defer func() {
+			for _, cleanup := range cleanups {
+				cleanup()
+			}
+		}()
 		if len(agentTools) > 0 {
 			toolInfos := make([]*schema.ToolInfo, 0, len(agentTools))
 			for _, item := range agentTools {
@@ -685,8 +690,9 @@ func buildChatModel(ctx context.Context, agent *model.Agent, config *model.Provi
 	}
 }
 
-func buildTools(agent *model.Agent) []tool.BaseTool {
+func prepareAgentTools(ctx context.Context, agent *model.Agent) ([]tool.BaseTool, []func()) {
 	agentTools := make([]tool.BaseTool, 0, len(agent.Tools))
+	cleanups := make([]func(), 0)
 	for _, item := range agent.Tools {
 		if !item.IsEnable {
 			continue
@@ -698,11 +704,50 @@ func buildTools(agent *model.Agent) []tool.BaseTool {
 			} else {
 				logs.Warnf("system tool %s is not registered", item.Name)
 			}
+		case model.McpToolType:
+			if item.McpConfig == nil {
+				logs.Warnf("MCP tool %s has no config", item.Name)
+				continue
+			}
+			config := &tools.McpConfig{
+				URL:            item.McpConfig.Url,
+				Type:           item.McpConfig.Type,
+				Token:          item.McpConfig.Token,
+				CredentialType: item.McpConfig.CredentialType,
+				ClientName:     "agent-platform",
+				ClientVersion:  "1.0.0",
+			}
+			mcpTools, cli, err := tools.GetMCPTools(ctx, config)
+			if err != nil {
+				logs.Warnf("load MCP tools from %s failed: %v", item.Name, err)
+				continue
+			}
+			cleanups = append(cleanups, func() { _ = cli.Close() })
+			prefix := item.ID.String()
+			if len(prefix) > 8 {
+				prefix = prefix[:8]
+			}
+			for _, mcpTool := range mcpTools {
+				invokable, ok := mcpTool.(tool.InvokableTool)
+				if !ok {
+					logs.Warnf("MCP tool from %s is not invokable", item.Name)
+					continue
+				}
+				info, infoErr := mcpTool.Info(ctx)
+				if infoErr != nil || info == nil {
+					logs.Warnf("load MCP tool info from %s failed: %v", item.Name, infoErr)
+					continue
+				}
+				agentTools = append(agentTools, &tools.NamedTool{
+					Name:     "mcp_" + prefix + "_" + info.Name,
+					Delegate: invokable,
+				})
+			}
 		default:
 			logs.Warnf("unsupported tool type %s", item.ToolType)
 		}
 	}
-	return agentTools
+	return agentTools, cleanups
 }
 
 func buildSystemPrompt(agent *model.Agent, agentTools []tool.BaseTool) string {
