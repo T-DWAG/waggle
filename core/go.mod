@@ -4,6 +4,8 @@ go 1.25.9
 
 require (
 	github.com/cloudwego/eino v0.8.7
+	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
+	github.com/mark3labs/mcp-go v0.44.0
 	github.com/mszlu521/thunder v1.0.13
 )
 
@@ -11,6 +13,8 @@ require (
 	cloud.google.com/go v0.118.3 // indirect
 	cloud.google.com/go/auth v0.15.0 // indirect
 	cloud.google.com/go/compute/metadata v0.6.0 // indirect
+	github.com/PuerkitoBio/goquery v1.8.1 // indirect
+	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.4.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.33.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
@@ -26,6 +30,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.28.10 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.9 // indirect
 	github.com/aws/smithy-go v1.22.1 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/baidubce/bce-qianfan-sdk/go/qianfan v0.0.14 // indirect
 	github.com/baidubce/bce-sdk-go v0.9.164 // indirect
@@ -34,13 +39,18 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260612103359-5b10d0299532 // indirect
+	github.com/cloudwego/eino-ext/components/document/parser/docx v0.0.0-20260517075931-80b50f07e90b // indirect
+	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20260616080858-ab17b7308bf8 // indirect
+	github.com/cloudwego/eino-ext/components/document/parser/pdf v0.0.0-20260616080858-ab17b7308bf8 // indirect
 	github.com/cloudwego/eino-ext/components/embedding/ark v0.1.1 // indirect
 	github.com/cloudwego/eino-ext/components/embedding/dashscope v0.0.0-20251114102822-95f6d97bd4ee // indirect
 	github.com/cloudwego/eino-ext/components/embedding/gemini v0.0.0-20251114102822-95f6d97bd4ee // indirect
 	github.com/cloudwego/eino-ext/components/embedding/ollama v0.0.0-20251114102822-95f6d97bd4ee // indirect
-	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20251114102822-95f6d97bd4ee // indirect
+	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260517075931-80b50f07e90b // indirect
 	github.com/cloudwego/eino-ext/components/embedding/qianfan v0.0.0-20251114102822-95f6d97bd4ee // indirect
 	github.com/cloudwego/eino-ext/components/embedding/tencentcloud v0.0.0-20251114102822-95f6d97bd4ee // indirect
+	github.com/cloudwego/eino-ext/components/indexer/es8 v0.0.0-20260517075931-80b50f07e90b // indirect
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.43 // indirect
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.10 // indirect
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.0.0-20251114102822-95f6d97bd4ee // indirect
@@ -49,12 +59,15 @@ require (
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
 	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.2 // indirect
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.5 // indirect
-	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
+	github.com/cloudwego/eino-ext/components/retriever/es8 v0.0.0-20260517075931-80b50f07e90b // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.15 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/eino-contrib/docx2md v0.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/eino-contrib/ollama v0.1.0 // indirect
+	github.com/elastic/elastic-transport-go/v8 v8.6.0 // indirect
+	github.com/elastic/go-elasticsearch/v8 v8.16.0 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
@@ -66,6 +79,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.5 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
@@ -73,10 +87,12 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
-	github.com/mark3labs/mcp-go v0.44.0 // indirect
-	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
+	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
@@ -85,6 +101,7 @@ require (
 	github.com/openai/openai-go v1.10.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect

@@ -18,6 +18,8 @@ func (*AgentsRouter) Register(engine *gin.Engine) {
 		group.POST("/chat", handler.AgentMessage)
 		// 批量关联必须在 /:id 之前注册，避免被详情路由截走。
 		group.POST("/:id/tools/batch", handler.UpdateAgentTools)
+		group.GET("/:id/knowledge-bases", handler.GetAgentKnowledgeBases)
+		group.POST("/:id/knowledge-bases/batch", handler.UpdateAgentKnowledgeBases)
 		group.GET("/:id", handler.GetAgent)
 	}
 }

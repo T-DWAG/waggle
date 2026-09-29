@@ -37,6 +37,10 @@ type Repository interface {
 	GetAgentWithTools(ctx context.Context, id, creatorID uuid.UUID) (*model.Agent, error)
 	DeleteAgentTools(ctx context.Context, agentID uuid.UUID) error
 	CreateAgentTools(ctx context.Context, agentTools []model.AgentTool) error
+
+	GetAgentKnowledgeBases(ctx context.Context, agentID uuid.UUID) ([]*model.KnowledgeBase, error)
+	CountOwnedKnowledgeBases(ctx context.Context, ids []uuid.UUID, creatorID uuid.UUID) (int64, error)
+	ReplaceAgentKnowledgeBases(ctx context.Context, agentID uuid.UUID, links []model.AgentKnowledgeBase) error
 }
 
 type Model struct {
@@ -342,4 +346,41 @@ func (m *Model) GetActiveLLMByProviderAndName(ctx context.Context, userID uuid.U
 		return nil, err
 	}
 	return &llm, nil
+}
+
+// GetAgentKnowledgeBases 与 GetAgentWithTools 同一写法：JOIN 关联表并按 status 过滤，
+// 不用 Preload（Preload 无法按关联表字段过滤，已解绑的库会被带出来）。
+func (m *Model) GetAgentKnowledgeBases(ctx context.Context, agentID uuid.UUID) ([]*model.KnowledgeBase, error) {
+	var kbs []*model.KnowledgeBase
+	err := m.db.WithContext(ctx).
+		Model(&model.KnowledgeBase{}).
+		Select("knowledge_bases.*").
+		Joins("JOIN agent_knowledge_bases ON agent_knowledge_bases.knowledge_base_id = knowledge_bases.id").
+		Where("agent_knowledge_bases.agent_id = ? AND agent_knowledge_bases.status = ?", agentID, model.Enabled).
+		Order("agent_knowledge_bases.created_at ASC").
+		Find(&kbs).Error
+	return kbs, err
+}
+
+func (m *Model) CountOwnedKnowledgeBases(ctx context.Context, ids []uuid.UUID, creatorID uuid.UUID) (int64, error) {
+	var count int64
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	err := m.db.WithContext(ctx).Model(&model.KnowledgeBase{}).
+		Where("id IN ? AND creator_id = ?", ids, creatorID).Count(&count).Error
+	return count, err
+}
+
+// ReplaceAgentKnowledgeBases 在一个事务里整体替换关联，避免删了旧关联、新关联没写进去。
+func (m *Model) ReplaceAgentKnowledgeBases(ctx context.Context, agentID uuid.UUID, links []model.AgentKnowledgeBase) error {
+	return m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("agent_id = ?", agentID).Delete(&model.AgentKnowledgeBase{}).Error; err != nil {
+			return err
+		}
+		if len(links) == 0 {
+			return nil
+		}
+		return tx.Create(&links).Error
+	})
 }

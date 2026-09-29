@@ -53,9 +53,10 @@
             <a href="#/providers" data-route="providers"><span>◈</span>厂商配置</a>
             <a href="#/models" data-route="models"><span>◇</span>模型管理</a>
             <a href="#/tools" data-route="tools"><span>⚙</span>工具管理</a>
+            <a href="#/knowledge" data-route="knowledge"><span>▤</span>知识库</a>
             <a href="#/chat" data-route="chat"><span>✦</span>调试对话</a>
           </nav>
-          <div class="sidebar-note"><b>验收顺序</b><ol><li>添加厂商配置</li><li>添加 Chat 模型</li><li>登记并测试天气工具</li><li>关联工具后发布智能体</li><li>开始流式对话</li></ol></div>
+          <div class="sidebar-note"><b>验收顺序</b><ol><li>添加厂商配置</li><li>添加 Chat 模型</li><li>登记并测试天气工具</li><li>关联工具 / 知识库后发布智能体</li><li>开始流式对话</li></ol></div>
         </aside>
 
         <div class="workspace">
@@ -82,6 +83,17 @@
             <div class="toolbar card"><label class="inline-input">⌕ <input id="toolSearch" placeholder="按名称搜索"></label><select id="toolTypeFilter"><option value="">全部类型</option><option value="system">system</option><option value="mcp">mcp</option></select><button class="button ghost small" id="toolSearchBtn">查询</button></div>
             <div class="notice">天气工具的注册名是 <code>get_weather</code>。高德 Key 配置在 <code>app/etc/config.yml</code> 的 <code>weather.apiKey</code>。</div>
             <div class="table-card card"><div class="table-wrap"><table><thead><tr><th>名称</th><th>类型</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody id="toolList"></tbody></table></div><div class="empty hidden" id="toolEmpty">暂无工具。</div></div>
+          </section>
+
+          <section class="route-page hidden" id="route-knowledge">
+            <div class="page-head"><div><p class="eyebrow">KNOWLEDGE BASE</p><h1>知识库</h1><p>上传文档 → 解析切片 → 向量化写入 Elasticsearch；关联到智能体后，对话前自动检索并注入上下文。</p></div><div class="row-actions"><button class="button ghost" id="kbRefreshBtn" type="button">刷新</button><button class="button primary" id="newKbBtn" type="button">+ 新建知识库</button></div></div>
+            <div class="notice">先在「厂商配置」添加 <code>siliconflow</code>（API Base <code>https://api.siliconflow.cn/v1</code>），再在「模型管理」添加类型为 <code>embedding</code> 的模型，例如 <code>BAAI/bge-m3</code>。向量维度建库时实测，建库后不能更换向量模型。</div>
+            <div class="table-card card"><div class="table-wrap"><table><thead><tr><th>名称</th><th>向量模型</th><th>文档 / 切片</th><th>创建时间</th><th></th></tr></thead><tbody id="kbList"></tbody></table></div><div class="empty hidden" id="kbEmpty">暂无知识库。</div></div>
+            <div class="kb-detail hidden" id="kbDetail">
+              <div class="page-head"><div><p class="eyebrow">DOCUMENTS</p><h2 id="kbDetailTitle">—</h2><p class="muted" id="kbDetailMeta"></p></div><label class="button primary" for="docFile">上传文档<input id="docFile" type="file" multiple accept=".md,.markdown,.txt,.pdf,.docx,.html,.htm" class="visually-hidden"></label></div>
+              <div class="table-card card"><div class="table-wrap"><table><thead><tr><th>文档</th><th>状态</th><th>切片</th><th>检索</th><th>更新时间</th><th></th></tr></thead><tbody id="docList"></tbody></table></div><div class="empty hidden" id="docEmpty">还没有文档。支持 md / txt / pdf / docx / html。</div></div>
+              <div class="card kb-search"><div class="toolbar"><label class="inline-input grow">⌕ <input id="kbQuery" placeholder="召回测试：输入一个问题，直接看检索结果（不经过模型）" aria-label="检索问题"></label><label class="inline-input">TopK <input id="kbTopK" type="number" min="1" max="20" value="5" aria-label="TopK"></label><label class="inline-input">阈值 <input id="kbMinScore" type="number" min="0" max="1" step="0.05" placeholder="不过滤" aria-label="最低融合分"></label><button class="button ghost small" id="kbSearchBtn" type="button">检索</button></div><div id="kbResults" aria-live="polite"></div></div>
+            </div>
           </section>
 
           <section class="route-page hidden" id="route-chat">

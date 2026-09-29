@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"app/internal/agents"
+	"app/internal/knowledge"
 	"app/internal/tools"
 	"model/shared"
 
@@ -38,4 +39,6 @@ func (*Event) Register() {
 		return &shared.ModelProviderResponse{ProvideConfig: cfg}, nil
 	})
 	event.Register("getToolsInIds", tools.NewPublicService().GetToolsInIds)
+	// agents 对话前的隐式检索与显式检索工具都走这条事件，agents 不直接 import knowledge。
+	event.Register("searchKnowledgeBases", knowledge.NewPublicService().Search)
 }

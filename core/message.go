@@ -1,6 +1,10 @@
 package core
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"core/rag"
+)
 
 type AgentMessage struct {
 	Action           string `json:"action"`
@@ -9,6 +13,8 @@ type AgentMessage struct {
 	IsErr            bool   `json:"isErr"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoningContent"`
+	// References 知识库引用，仅在 action=agent_references 时出现。
+	References []rag.Reference `json:"references,omitempty"`
 }
 
 func BuildErrMessage(agentName string, errMsg string) string {
@@ -39,6 +45,17 @@ func BuildContentMessage(agentName string, toolName string, content string) stri
 		AgentName: agentName,
 		ToolName:  toolName,
 		Content:   content,
+	}
+	bytes, _ := json.Marshal(msg)
+	return string(bytes)
+}
+
+// BuildReferencesMessage 回答结束后推一条引用消息，前端据此渲染「参考来源」，编号与 ragContext 里的 [n] 一致。
+func BuildReferencesMessage(agentName string, references []rag.Reference) string {
+	msg := AgentMessage{
+		Action:     "agent_references",
+		AgentName:  agentName,
+		References: references,
 	}
 	bytes, _ := json.Marshal(msg)
 	return string(bytes)

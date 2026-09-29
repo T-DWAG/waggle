@@ -48,3 +48,23 @@ auth:
     - "/api/v1/auth/**"
   needLogins: # ⚠️ 语义是反的：命中即放行且不塞 userId，它是陷阱，留空
     - ""
+
+# 07 知识库：ES 只放检索副本，PG 放权威数据。
+# 密码不写进仓库：passwordEnv 指定的环境变量优先（值与 docker/.env 的 ELASTIC_PASSWORD 一致）。
+elasticsearch:
+  addresses:
+    - "http://localhost:9200"
+  username: "elastic"
+  passwordEnv: "ELASTIC_PASSWORD"
+knowledge:
+  storageDir: "./data/knowledge"   # 原文存储根目录（本地实现，接口已抽象，可换 OSS）
+  maxFileSizeMB: 20
+  chunkSize: 800                   # 单切片字符上限
+  chunkOverlap: 80
+  embeddingBatchSize: 16
+  topK: 5
+  minScore: 0.35                   # 融合分阈值：实测 bge-m3 相关 ≥0.45、无关 ≤0.29，取中间
+  vectorWeight: 0.7
+  keywordWeight: 0.3
+  contextMaxRunes: 4000            # 注入 ragContext 的总字符上限
+  retrieveTimeoutSec: 6            # 对话前隐式检索超时，超时直接跳过、不阻塞聊天

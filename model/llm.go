@@ -12,6 +12,8 @@ var (
 	OllamaProvider = "ollama"
 	OpenAIProvider = "openai"
 	QwenProvider   = "qwen"
+	// SiliconFlowProvider 硅基流动，OpenAI 兼容协议；当前只用于向量模型，映射见 core/rag/embedder.go。
+	SiliconFlowProvider = "siliconflow"
 )
 
 // LLMStatus 定义了模型状态

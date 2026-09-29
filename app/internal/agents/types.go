@@ -80,6 +80,21 @@ type ToolsRequest struct {
 	Tools []ToolItem `json:"tools" binding:"required"`
 }
 
+// KnowledgeBasesRequest 整体替换智能体绑定的知识库；空数组表示全部解绑。
+type KnowledgeBasesRequest struct {
+	KnowledgeBaseIDs []uuid.UUID `json:"knowledgeBaseIds"`
+}
+
+type AgentKnowledgeBaseResponse struct {
+	ID                 uuid.UUID `json:"id"`
+	Name               string    `json:"name"`
+	Description        string    `json:"description"`
+	EmbeddingModelName string    `json:"embeddingModelName"`
+	DocumentCount      uint      `json:"documentCount"`
+	ChunkCount         uint      `json:"chunkCount"`
+	Status             string    `json:"status"`
+}
+
 type ToolItem struct {
 	ID   uuid.UUID `json:"id" binding:"required"`
 	Type string    `json:"type" binding:"required"`

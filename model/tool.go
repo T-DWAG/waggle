@@ -57,6 +57,7 @@ type McpConfig struct {
 	Url                    string `json:"url,omitempty"`
 	AuthenticationRequired bool   `json:"authenticationRequired,omitempty"`
 	CredentialType         string `json:"credentialType,omitempty"`
+	Token                  string `json:"token,omitempty"`
 }
 
 func (c McpConfig) Value() (driver.Value, error) {

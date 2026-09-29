@@ -22,5 +22,6 @@ func Init(s *server.Server, conf *config.Config) {
 		&router.AgentsRouter{},
 		&router.ProviderRouter{},
 		&router.ToolRouter{},
+		&router.KnowledgeRouter{},
 	)
 }

@@ -12,6 +12,7 @@ import (
 	"common/biz"
 	"core"
 	"core/ai"
+	"core/rag"
 	"core/tools"
 	"model"
 	"model/shared"
@@ -478,6 +479,88 @@ func (s *Service) UpdateAgentTools(parent context.Context, userID, agentID uuid.
 	return agentTools, nil
 }
 
+// GetAgentKnowledgeBases 智能体当前启用的知识库。
+func (s *Service) GetAgentKnowledgeBases(parent context.Context, userID, agentID uuid.UUID) ([]*AgentKnowledgeBaseResponse, error) {
+	ctx, cancel := context.WithTimeout(parent, databaseTimeout)
+	defer cancel()
+	if err := s.ensureAgentOwner(ctx, userID, agentID); err != nil {
+		return nil, err
+	}
+	kbs, err := s.repo.GetAgentKnowledgeBases(ctx, agentID)
+	if err != nil {
+		logs.Errorf("get agent knowledge bases: %v", err)
+		return nil, errs.DBError
+	}
+	return toAgentKnowledgeBaseResponses(kbs), nil
+}
+
+// UpdateAgentKnowledgeBases 整体替换绑定。知识库必须全部属于当前用户，否则 4001（不暴露别人库的存在性）。
+func (s *Service) UpdateAgentKnowledgeBases(parent context.Context, userID, agentID uuid.UUID, request *KnowledgeBasesRequest) ([]*AgentKnowledgeBaseResponse, error) {
+	ctx, cancel := context.WithTimeout(parent, databaseTimeout)
+	defer cancel()
+	if err := s.ensureAgentOwner(ctx, userID, agentID); err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(request.KnowledgeBaseIDs))
+	seen := make(map[uuid.UUID]struct{}, len(request.KnowledgeBaseIDs))
+	for _, id := range request.KnowledgeBaseIDs {
+		if id == uuid.Nil {
+			return nil, errs.ErrParam
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	owned, err := s.repo.CountOwnedKnowledgeBases(ctx, ids, userID)
+	if err != nil {
+		logs.Errorf("count owned knowledge bases: %v", err)
+		return nil, errs.DBError
+	}
+	if owned != int64(len(ids)) {
+		return nil, biz.ErrKnowledgeBaseNotFound
+	}
+	now := time.Now()
+	links := make([]model.AgentKnowledgeBase, 0, len(ids))
+	for _, id := range ids {
+		links = append(links, model.AgentKnowledgeBase{AgentID: agentID, KnowledgeBaseID: id, Status: model.Enabled, CreatedAt: now})
+	}
+	if err := s.repo.ReplaceAgentKnowledgeBases(ctx, agentID, links); err != nil {
+		logs.Errorf("replace agent knowledge bases: %v", err)
+		return nil, errs.DBError
+	}
+	kbs, err := s.repo.GetAgentKnowledgeBases(ctx, agentID)
+	if err != nil {
+		logs.Errorf("get agent knowledge bases: %v", err)
+		return nil, errs.DBError
+	}
+	return toAgentKnowledgeBaseResponses(kbs), nil
+}
+
+func (s *Service) ensureAgentOwner(ctx context.Context, userID, agentID uuid.UUID) error {
+	agent, err := s.repo.GetAgentByIDAndCreator(ctx, agentID, userID)
+	if err != nil {
+		logs.Errorf("get agent: %v", err)
+		return errs.DBError
+	}
+	if agent == nil {
+		return biz.ErrAgentNotFound
+	}
+	return nil
+}
+
+func toAgentKnowledgeBaseResponses(kbs []*model.KnowledgeBase) []*AgentKnowledgeBaseResponse {
+	list := make([]*AgentKnowledgeBaseResponse, 0, len(kbs))
+	for _, kb := range kbs {
+		list = append(list, &AgentKnowledgeBaseResponse{
+			ID: kb.ID, Name: kb.Name, Description: kb.Description, EmbeddingModelName: kb.EmbeddingModelName,
+			DocumentCount: kb.DocumentCount, ChunkCount: kb.ChunkCount, Status: string(kb.Status),
+		})
+	}
+	return list
+}
+
 func (s *Service) getToolsByIDs(ids []uuid.UUID) ([]*model.Tool, error) {
 	if len(ids) == 0 {
 		return []*model.Tool{}, nil
@@ -580,6 +663,15 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 				cleanup()
 			}
 		}()
+		ragContext, references := "", []rag.Reference(nil)
+		if kbIDs := s.agentKnowledgeBaseIDs(ctx, agent.ID); len(kbIDs) > 0 {
+			ragContext, references = retrieveKnowledge(userID, kbIDs, request.Message)
+			agentTools = append(agentTools, &rag.KnowledgeTool{
+				Name:        rag.KnowledgeToolName,
+				Description: "在当前智能体绑定的知识库中检索资料。系统提示里的知识库片段不足以回答时，换一个更具体的说法调用本工具再查。",
+				Search:      knowledgeSearchFunc(userID, kbIDs),
+			})
+		}
 		if len(agentTools) > 0 {
 			toolInfos := make([]*schema.ToolInfo, 0, len(agentTools))
 			for _, item := range agentTools {
@@ -598,7 +690,7 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 			}
 		}
 
-		messages := []*schema.Message{schema.SystemMessage(buildSystemPrompt(agent, agentTools)), schema.UserMessage(request.Message)}
+		messages := []*schema.Message{schema.SystemMessage(buildSystemPrompt(agent, agentTools, ragContext)), schema.UserMessage(request.Message)}
 		const maxToolRounds = 4
 		for round := 0; ; round++ {
 			stream, err := chatModel.Stream(ctx, messages)
@@ -615,6 +707,9 @@ func (s *Service) AgentMessageStream(ctx context.Context, userID uuid.UUID, requ
 				return
 			}
 			if message == nil || len(message.ToolCalls) == 0 || round == maxToolRounds {
+				if len(references) > 0 {
+					sendData(ctx, dataChan, core.BuildReferencesMessage(agent.Name, references))
+				}
 				return
 			}
 
@@ -750,14 +845,63 @@ func prepareAgentTools(ctx context.Context, agent *model.Agent) ([]tool.BaseTool
 	return agentTools, cleanups
 }
 
-func buildSystemPrompt(agent *model.Agent, agentTools []tool.BaseTool) string {
+// agentKnowledgeBaseIDs 读取启用中的知识库绑定；查询失败只告警，知识库是增强不是前提。
+func (s *Service) agentKnowledgeBaseIDs(ctx context.Context, agentID uuid.UUID) []uuid.UUID {
+	kbs, err := s.repo.GetAgentKnowledgeBases(ctx, agentID)
+	if err != nil {
+		logs.Warnf("load agent knowledge bases: %v", err)
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb.Status == model.KnowledgeBaseStatusActive {
+			ids = append(ids, kb.ID)
+		}
+	}
+	return ids
+}
+
+// retrieveKnowledge 对话前的隐式检索：用用户原话查一次，结果填进 {ragContext}。
+// 任何失败（超时、向量模型不可用、ES 挂了）都返回空，照常聊天。
+func retrieveKnowledge(userID uuid.UUID, kbIDs []uuid.UUID, query string) (string, []rag.Reference) {
+	result, err := event.Trigger("searchKnowledgeBases", &shared.KnowledgeSearchParams{
+		UserID: userID, KnowledgeBaseIDs: kbIDs, Query: query,
+	})
+	if err != nil {
+		logs.Warnf("knowledge retrieval skipped: %v", err)
+		return "", nil
+	}
+	retrieved, ok := result.(*rag.RetrieveResult)
+	if !ok || retrieved == nil {
+		return "", nil
+	}
+	return retrieved.Context, retrieved.References
+}
+
+func knowledgeSearchFunc(userID uuid.UUID, kbIDs []uuid.UUID) rag.SearchFunc {
+	return func(_ context.Context, query string, topK int) ([]rag.Hit, error) {
+		result, err := event.Trigger("searchKnowledgeBases", &shared.KnowledgeSearchParams{
+			UserID: userID, KnowledgeBaseIDs: kbIDs, Query: query, TopK: topK,
+		})
+		if err != nil {
+			return nil, err
+		}
+		retrieved, ok := result.(*rag.RetrieveResult)
+		if !ok || retrieved == nil {
+			return nil, fmt.Errorf("unexpected knowledge search response: %T", result)
+		}
+		return retrieved.Hits, nil
+	}
+}
+
+func buildSystemPrompt(agent *model.Agent, agentTools []tool.BaseTool, ragContext string) string {
 	toolsInfo := "当前没有可用工具。"
 	if len(agentTools) > 0 {
 		toolsInfo = formatToolsDescription(agentTools)
 	}
 	prompt := strings.NewReplacer(
 		"{role}", agent.SystemPrompt,
-		"{ragContext}", "",
+		"{ragContext}", ragContext,
 		"{toolsInfo}", toolsInfo,
 		"{agentsInfo}", "",
 	).Replace(ai.BaseSystemPrompt)

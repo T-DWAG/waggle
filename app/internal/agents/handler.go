@@ -317,6 +317,44 @@ func (h *Handler) UpdateAgentTools(c *gin.Context) {
 	res.Success(c, response)
 }
 
+func (h *Handler) GetAgentKnowledgeBases(c *gin.Context) {
+	var agentID uuid.UUID
+	if err := req.Path(c, "id", &agentID); err != nil {
+		return
+	}
+	userID, ok := req.GetUserIdUUID(c)
+	if !ok {
+		return
+	}
+	response, err := h.service.GetAgentKnowledgeBases(c.Request.Context(), userID, agentID)
+	if err != nil {
+		res.Error(c, err)
+		return
+	}
+	res.Success(c, response)
+}
+
+func (h *Handler) UpdateAgentKnowledgeBases(c *gin.Context) {
+	var request KnowledgeBasesRequest
+	var agentID uuid.UUID
+	if err := req.Path(c, "id", &agentID); err != nil {
+		return
+	}
+	if err := req.JsonParam(c, &request); err != nil {
+		return
+	}
+	userID, ok := req.GetUserIdUUID(c)
+	if !ok {
+		return
+	}
+	response, err := h.service.UpdateAgentKnowledgeBases(c.Request.Context(), userID, agentID, &request)
+	if err != nil {
+		res.Error(c, err)
+		return
+	}
+	res.Success(c, response)
+}
+
 func (h *Handler) AgentMessage(c *gin.Context) {
 	var request ChatRequest
 	if err := req.JsonParam(c, &request); err != nil {
