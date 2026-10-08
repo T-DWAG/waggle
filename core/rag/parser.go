@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	docxparser "github.com/cloudwego/eino-ext/components/document/parser/docx"
-	htmlparser "github.com/cloudwego/eino-ext/components/document/parser/html"
 	pdfparser "github.com/cloudwego/eino-ext/components/document/parser/pdf"
 	"github.com/cloudwego/eino/components/document/parser"
 )
@@ -55,7 +54,7 @@ type ParseResult struct {
 }
 
 // Parse 把原始文件字节解析成文本。
-// md/txt 直接读；pdf/docx/html 走 eino-ext 的 parser。docx 解析器输出的本来就是 Markdown，
+// md/txt 直接读；pdf/docx 走 eino-ext 的 parser，html 自行转 Markdown。docx 解析器输出的本来就是 Markdown，
 // 所以 docx 也走标题切分——这是它比 pdf 切得好的原因。
 func Parse(ctx context.Context, fileType string, content []byte) (*ParseResult, error) {
 	switch fileType {
@@ -82,17 +81,19 @@ func Parse(ctx context.Context, fileType string, content []byte) (*ParseResult, 
 		if err != nil {
 			return nil, err
 		}
+		// 字体缺 ToUnicode 映射的 PDF 会解析出大段乱码：去掉乱码行，整体不可读则直接失败。
+		text, err = CleanExtractedText(text)
+		if err != nil {
+			return nil, err
+		}
 		return &ParseResult{Text: text}, nil
 	case FileTypeHTML:
-		p, err := htmlparser.NewParser(ctx, &htmlparser.Config{Selector: &htmlparser.BodySelector})
+		// 自己转 Markdown：eino-ext 的 html parser 只取纯文本，标题丢失、块之间不留换行。
+		text, err := HTMLToMarkdown(content)
 		if err != nil {
 			return nil, err
 		}
-		text, err := runParser(ctx, p, content)
-		if err != nil {
-			return nil, err
-		}
-		return &ParseResult{Text: text}, nil
+		return &ParseResult{Text: text, IsMarkdown: true}, nil
 	default:
 		return nil, fmt.Errorf("unsupported file type %q", fileType)
 	}

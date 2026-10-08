@@ -69,7 +69,7 @@ func Search(ctx context.Context, client *elasticsearch.Client, embedder embeddin
 	}
 
 	var (
-		wg                     sync.WaitGroup
+		wg                      sync.WaitGroup
 		vectorHits, keywordHits []rawHit
 		vectorErr, keywordErr   error
 	)

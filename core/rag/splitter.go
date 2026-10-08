@@ -122,9 +122,9 @@ func SplitPlainText(content string, options SplitOptions) []Chunk {
 	paragraphs := blankLines.Split(strings.ReplaceAll(content, "\r\n", "\n"), -1)
 
 	var (
-		chunks  []Chunk
-		buffer  strings.Builder
-		index   int
+		chunks []Chunk
+		buffer strings.Builder
+		index  int
 	)
 	emit := func(text string) {
 		for _, part := range SplitLong(text, options.MaxRunes, options.Overlap) {

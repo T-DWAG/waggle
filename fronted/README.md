@@ -27,10 +27,10 @@ python fronted/serve.py            # 默认 5173
 
 后端 `config.yml` 里写的是 `cors:`，但 thunder 读的字段是 **`cros`**
 （`midd/cros.go` 里是 `conf.Cros`），所以 CORS 中间件实际没挂上，预检请求直接 404。
-`serve.py` 把 `/api/*` **同源反代**到 `http://127.0.0.1:8888`，前端当同源用，绕开 CORS。
+`serve.py` 把 `/api/*` **同源反代**到 `http://127.0.0.1:18888`，前端当同源用，绕开 CORS。
 （这也正是 `blog_build/frontend/api-base.js` 里注释的"线上走 nginx 反代"做法。）
 
-想改成直连后端也行：把 `api-base.js` 改成 `window.API_BASE = 'http://127.0.0.1:8888'`，
+想改成直连后端也行：把 `api-base.js` 改成 `window.API_BASE = 'http://127.0.0.1:18888'`，
 同时把 `app/etc/config.yml` 的 `cors:` 改成 `cros:` 并重启后端。
 
 ## 界面

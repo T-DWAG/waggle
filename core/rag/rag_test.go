@@ -200,9 +200,10 @@ func TestKnowledgeToolValidatesArguments(t *testing.T) {
 }
 
 // TestIntegrationIndexAndSearch 需要真实 ES 与向量模型，环境变量不全时跳过：
-//   RAG_IT_ES_ADDR / RAG_IT_ES_USER / RAG_IT_ES_PASSWORD
-//   RAG_IT_EMBED_BASE / RAG_IT_EMBED_KEY / RAG_IT_EMBED_MODEL
-//   RAG_IT_DOC（可选，Markdown 文件路径）
+//
+//	RAG_IT_ES_ADDR / RAG_IT_ES_USER / RAG_IT_ES_PASSWORD
+//	RAG_IT_EMBED_BASE / RAG_IT_EMBED_KEY / RAG_IT_EMBED_MODEL
+//	RAG_IT_DOC（可选，Markdown 文件路径）
 func TestIntegrationIndexAndSearch(t *testing.T) {
 	addr, key := os.Getenv("RAG_IT_ES_ADDR"), os.Getenv("RAG_IT_EMBED_KEY")
 	if addr == "" || key == "" {
@@ -273,5 +274,73 @@ func TestIntegrationIndexAndSearch(t *testing.T) {
 	}
 	if count, _ := CountByDocument(ctx, client, index, "doc-1"); count != 0 {
 		t.Fatalf("expected 0 chunks after delete, got %d", count)
+	}
+}
+
+func TestLocalStoreDeletePrunesEmptyDirs(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLocalStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a, b := ObjectKey("kb1", "doc1", "md"), ObjectKey("kb1", "doc2", "md")
+	for _, key := range []string{a, b} {
+		if err := store.Put(ctx, key, strings.NewReader("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = store.Delete(ctx, a)
+	if _, err := os.Stat(filepath.Join(root, "kb", "kb1")); err != nil {
+		t.Fatalf("non-empty dir must be kept: %v", err)
+	}
+	_ = store.Delete(ctx, b)
+	if _, err := os.Stat(filepath.Join(root, "kb")); !os.IsNotExist(err) {
+		t.Fatalf("empty dirs should be pruned, got %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("root must be kept: %v", err)
+	}
+	if err := store.Put(ctx, a, strings.NewReader("x")); err != nil {
+		t.Fatalf("put after prune: %v", err)
+	}
+}
+
+func TestCleanExtractedText(t *testing.T) {
+	good := "第一章 介绍\nMCP 是一种协议，支持 stdio、SSE。\n温度 25°C · 正常"
+	out, err := CleanExtractedText(good + "\nÆÇØ`\u0088")
+	if err != nil || out != good {
+		t.Fatalf("garbled line should be dropped only: %q %v", out, err)
+	}
+	if _, err := CleanExtractedText("fqÈBU_^DQº>?Ò\nØÆà\u0088\nÁ\u008a\x1bqÈÊ\u009fÄUý\nok"); err != ErrUnreadableText {
+		t.Fatalf("mostly garbled text should fail, got %v", err)
+	}
+}
+
+func TestHTMLToMarkdownKeepsHeadingsAndBlocks(t *testing.T) {
+	src := `<html><head><style>h1{}</style></head><body><div id="write">
+<h1><span>MCP 详解</span></h1><p><strong>MCP</strong><span> 是协议。</span></p>
+<h2>传输</h2><ul><li><p>stdio</p></li><li>SSE</li></ul>
+<pre class="md-fences"><div class="CodeMirror"><textarea>junk</textarea><div class="CodeMirror-measure"><pre><span>xxxxxxxxxx</span></pre></div><div cm-not-content="true">x</div>
+<pre class="CodeMirror-line"><span>func main() {</span></pre><pre class="CodeMirror-line"><span>}</span></pre></div></pre>
+<table><tr><th>方式</th><th>说明</th></tr><tr><td>stdio</td><td>本地</td></tr></table>
+<script>alert(1)</script></div></body></html>`
+	md, err := HTMLToMarkdown([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# MCP 详解\n\nMCP 是协议。", "## 传输", "- stdio", "- SSE", "```\nfunc main() {\n}\n```", "| 方式 | 说明"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("missing %q in:\n%s", want, md)
+		}
+	}
+	for _, bad := range []string{"junk", "alert", "h1{}", "xxxxxxxxxx"} {
+		if strings.Contains(md, bad) {
+			t.Fatalf("should drop %q:\n%s", bad, md)
+		}
+	}
+	chunks := Split(&ParseResult{Text: md, IsMarkdown: true}, SplitOptions{Title: "t"})
+	if len(chunks) == 0 || HeadingPath(chunks[len(chunks)-1].Meta) == "" {
+		t.Fatalf("html chunks should carry heading path: %#v", chunks)
 	}
 }

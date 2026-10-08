@@ -63,6 +63,12 @@ func (s *LocalStore) Put(_ context.Context, key string, reader io.Reader) error 
 	}
 	// 先写临时文件再 rename：进程中途崩溃也不会留下半截原文。
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".upload-*")
+	if errors.Is(err, os.ErrNotExist) {
+		// 极少数情况下目录刚被并发的 Delete 清理掉，重建后再试一次。
+		if err = os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+			tmp, err = os.CreateTemp(filepath.Dir(path), ".upload-*")
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -98,7 +104,19 @@ func (s *LocalStore) Delete(_ context.Context, key string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	s.pruneEmptyDirs(filepath.Dir(path))
 	return nil
+}
+
+// pruneEmptyDirs 自下而上删掉空目录（如删库后的 kb/<kbID>），最多到 root 为止。
+// os.Remove 只删空目录，非空即停；并发上传时 Put 会 MkdirAll 重建，不会丢文件。
+func (s *LocalStore) pruneEmptyDirs(dir string) {
+	for strings.HasPrefix(dir, s.root+string(os.PathSeparator)) {
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // ObjectKey 统一原文 key 规则。

@@ -14,21 +14,21 @@ import (
 
 // 检索字段名。mapping 与 search body 共用这几个常量，避免两边写错。
 const (
-	FieldContent = "content"
-	FieldVector  = "content_vector"
-	FieldKBID    = "kb_id"
-	FieldDocID   = "doc_id"
-	FieldDocName = "doc_name"
+	FieldContent  = "content"
+	FieldVector   = "content_vector"
+	FieldKBID     = "kb_id"
+	FieldDocID    = "doc_id"
+	FieldDocName  = "doc_name"
 	FieldFileType = "file_type"
 	FieldPosition = "position"
-	FieldMeta    = "metadata"
+	FieldMeta     = "metadata"
 )
 
 // ESConfig Elasticsearch 连接配置，来自 app/etc/config.yml 的 elasticsearch 段。
 type ESConfig struct {
-	Addresses []string
-	Username  string
-	Password  string
+	Addresses  []string
+	Username   string
+	Password   string
 	TimeoutSec int
 }
 
@@ -56,7 +56,7 @@ func NewClient(ctx context.Context, config *ESConfig) (*elasticsearch.Client, er
 	return client, nil
 }
 
-// IndexName 一个知识库一个索引。去掉 uuid 里的横线，避免索引名里出现 '-' 
+// IndexName 一个知识库一个索引。去掉 uuid 里的横线，避免索引名里出现 '-'
 // （ES 索引名允许 '-'，但去掉后更贴近 ES 自动生成的原始索引名风格，也便于正则匹配）。
 func IndexName(kbID string) string {
 	return "kb_" + strings.ReplaceAll(strings.ToLower(kbID), "-", "")

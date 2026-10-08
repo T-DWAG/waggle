@@ -7,7 +7,7 @@
 为什么需要它:
   1. 后端 config.yml 写的是 cors:，而 thunder 读的是 cros（midd/cros.go 里是 conf.Cros），
      所以后端实际没有挂 CORS 中间件，跨域请求会被浏览器拦。
-     这里把 /api/* 同源反代到 127.0.0.1:8888，前端当同源用，绕开 CORS。
+     这里把 /api/* 同源反代到 127.0.0.1:18888，前端当同源用，绕开 CORS。
   2. 默认端口 5173，正好是后端邮箱验证成功后 302 跳转的地址，
      点完邮件里的链接会直接落回本页面。
 """
@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
-BACKEND = os.environ.get('BACKEND', 'http://127.0.0.1:8888')
+BACKEND = os.environ.get('BACKEND', 'http://127.0.0.1:18888')
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
