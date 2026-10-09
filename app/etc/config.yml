@@ -61,6 +61,10 @@ knowledge:
   maxFileSizeMB: 20
   chunkSize: 800                   # 单切片字符上限
   chunkOverlap: 80
+  parentChunkSize: 1200            # 父子分段：父块字符上限
+  childChunkSize: 300              # 父子分段：子块字符上限
+  childChunkOverlap: 40            # 父子分段：子块重叠
+  childOverfetch: 3                # 子块检索倍数：先取 topK×3 个子块，回填去重后再截 topK
   embeddingBatchSize: 16
   topK: 5
   minScore: 0.35                   # 融合分阈值：实测 bge-m3 相关 ≥0.45、无关 ≤0.29，取中间

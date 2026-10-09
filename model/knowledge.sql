@@ -115,3 +115,7 @@ CREATE TABLE IF NOT EXISTS agent_knowledge_bases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_akb_kb_id ON agent_knowledge_bases(knowledge_base_id);
+
+-- 08 父子分段：切片模式。已有库默认 flat，行为与 07 完全一致。
+ALTER TABLE knowledge_bases
+    ADD COLUMN IF NOT EXISTS chunk_mode VARCHAR(20) NOT NULL DEFAULT 'flat';

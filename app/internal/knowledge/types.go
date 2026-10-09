@@ -14,6 +14,7 @@ type CreateKnowledgeBaseRequest struct {
 	EmbeddingModelProvider string   `json:"embeddingModelProvider" binding:"required,max=50"`
 	EmbeddingModelName     string   `json:"embeddingModelName" binding:"required,max=255"`
 	Tags                   []string `json:"tags"`
+	ChunkMode              string   `json:"chunkMode"` // 空 = flat
 }
 
 // UpdateKnowledgeBaseRequest 只允许改展示信息。
@@ -25,6 +26,7 @@ type UpdateKnowledgeBaseRequest struct {
 	Status                 *string   `json:"status"`
 	EmbeddingModelProvider *string   `json:"embeddingModelProvider"`
 	EmbeddingModelName     *string   `json:"embeddingModelName"`
+	ChunkMode              *string   `json:"chunkMode"` // 仅用于拒绝修改
 }
 
 type ListKnowledgeBasesRequest struct {
@@ -41,6 +43,7 @@ type KnowledgeBaseResponse struct {
 	EmbeddingModelName     string    `json:"embeddingModelName"`
 	EmbeddingDimension     int       `json:"embeddingDimension"`
 	StorageType            string    `json:"storageType"`
+	ChunkMode              string    `json:"chunkMode"`
 	IndexName              string    `json:"indexName"`
 	DocumentCount          uint      `json:"documentCount"`
 	ChunkCount             uint      `json:"chunkCount"`
@@ -106,6 +109,7 @@ type SearchResult struct {
 	VectorScore  float64        `json:"vectorScore"`
 	KeywordScore float64        `json:"keywordScore"`
 	Metadata     map[string]any `json:"metadata"`
+	Matched      string         `json:"matched,omitempty"` // parent_child：命中的子块正文
 }
 
 type SearchResponse struct {

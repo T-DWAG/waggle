@@ -52,6 +52,7 @@ type Hit struct {
 	Score        float64        `json:"score"`        // 融合分
 	VectorScore  float64        `json:"vectorScore"`  // 余弦相似度 [-1,1]
 	KeywordScore float64        `json:"keywordScore"` // BM25 原始分
+	Matched      string         `json:"matched,omitempty"` // parent_child：回填前命中的子块正文
 }
 
 // Search 混合检索：query 向量化 → knn 与 BM25 并发 → 按 _id 合并 → 加权 → 过滤 → 截断 TopK。

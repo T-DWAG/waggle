@@ -40,4 +40,6 @@ var (
 	ErrEmbeddingModelImmutable = errs.NewError(4009, "知识库创建后不能更换向量模型")
 	ErrDocumentSourceMissing   = errs.NewError(4010, "文档原文已丢失，无法重新索引")
 	ErrKnowledgeBaseInUse      = errs.NewError(4011, "知识库正被智能体使用，请先解绑")
+	ErrChunkModeImmutable      = errs.NewError(4012, "知识库创建后不能更换切片模式")
+	ErrChunkModeInvalid        = errs.NewError(4013, "不支持的切片模式")
 )

@@ -52,6 +52,14 @@ func (s *service) createKnowledgeBase(parent context.Context, userID uuid.UUID, 
 	if name == "" || provider == "" || modelName == "" {
 		return nil, errs.ErrParam
 	}
+	mode := model.ChunkMode(strings.TrimSpace(request.ChunkMode))
+	if mode == "" {
+		mode = model.ChunkModeFlat
+	}
+	if mode != model.ChunkModeFlat && mode != model.ChunkModeParentChild {
+		return nil, biz.ErrChunkModeInvalid
+	}
+
 	ctx, cancel := context.WithTimeout(parent, createTimeout)
 	defer cancel()
 
@@ -81,6 +89,7 @@ func (s *service) createKnowledgeBase(parent context.Context, userID uuid.UUID, 
 		EmbeddingModelName:     modelName,
 		EmbeddingDimension:     dims,
 		StorageType:            model.StorageTypeElasticSearch,
+		ChunkMode:              mode,
 		IndexName:              rag.IndexName(id.String()),
 		Tags:                   cleanTags(request.Tags),
 		Status:                 model.KnowledgeBaseStatusActive,
@@ -144,6 +153,9 @@ func (s *service) updateKnowledgeBase(parent context.Context, userID, id uuid.UU
 	if (request.EmbeddingModelProvider != nil && strings.TrimSpace(*request.EmbeddingModelProvider) != kb.EmbeddingModelProvider) ||
 		(request.EmbeddingModelName != nil && strings.TrimSpace(*request.EmbeddingModelName) != kb.EmbeddingModelName) {
 		return nil, biz.ErrEmbeddingModelImmutable
+	}
+	if request.ChunkMode != nil && model.ChunkMode(strings.TrimSpace(*request.ChunkMode)) != effectiveChunkMode(kb) {
+		return nil, biz.ErrChunkModeImmutable
 	}
 	if request.Name != nil {
 		name := strings.TrimSpace(*request.Name)
@@ -470,8 +482,13 @@ func (s *service) processDocument(ctx context.Context, kb *model.KnowledgeBase, 
 	}
 	title := strings.TrimSuffix(doc.Name, filepath.Ext(doc.Name))
 	settings := s.rt.settings
-	chunks := rag.Split(parsed, rag.SplitOptions{MaxRunes: settings.ChunkSize, Overlap: settings.ChunkOverlap, Title: title})
-	if len(chunks) == 0 {
+	var built builtChunks
+	if effectiveChunkMode(kb) == model.ChunkModeParentChild {
+		built = s.buildParentChild(kb, docID, parsed, title)
+	} else {
+		built = s.buildFlat(kb, docID, parsed, title)
+	}
+	if len(built.store) == 0 {
 		return stepError{"切片", errors.New("文档没有可索引的文本")}
 	}
 
@@ -491,27 +508,7 @@ func (s *service) processDocument(ctx context.Context, kb *model.KnowledgeBase, 
 		return stepError{"清理旧切片", err}
 	}
 
-	now := time.Now()
-	records := make([]*model.DocumentChunk, 0, len(chunks))
-	storeChunks := make([]rag.StoreChunk, 0, len(chunks))
-	totalTokens := 0
-	for i, chunk := range chunks {
-		id := uuid.New()
-		tokens := estimateTokens(chunk.Raw)
-		totalTokens += tokens
-		records = append(records, &model.DocumentChunk{
-			BaseModel:       model.BaseModel{ID: id, CreatedAt: now, UpdatedAt: now},
-			DocumentID:      docID,
-			KnowledgeBaseID: kb.ID,
-			ElasticSearchID: id.String(),
-			ChunkIndex:      i,
-			Content:         chunk.Raw,
-			TokenCount:      tokens,
-			MetaInfo:        model.JSON(chunk.Meta),
-			Status:          model.ChunkStatusEmbedded,
-		})
-		storeChunks = append(storeChunks, rag.StoreChunk{ID: id.String(), Content: chunk.Content, Position: i, Meta: chunk.Meta})
-	}
+	records, storeChunks, totalTokens := built.records, built.store, built.tokens
 	if err := rag.StoreDocument(ctx, client, embedder, &rag.StoreRequest{
 		Index: kb.IndexName, KnowledgeID: kb.ID.String(), DocumentID: docID.String(),
 		DocumentName: doc.Name, FileType: doc.FileType, Chunks: storeChunks, BatchSize: settings.EmbeddingBatchSize,
@@ -525,7 +522,7 @@ func (s *service) processDocument(ctx context.Context, kb *model.KnowledgeBase, 
 	}
 	return s.repo.updateDocumentFields(ctx, docID, map[string]any{
 		"status": model.DocumentStatusCompleted, "token_count": totalTokens, "error_message": "",
-		"meta_info": model.JSON{"chunkSize": settings.ChunkSize, "chunkOverlap": settings.ChunkOverlap, "chunks": len(records)},
+		"meta_info": s.documentMeta(kb, len(records), len(storeChunks)),
 		"updated_at": time.Now(),
 	})
 }
@@ -573,6 +570,7 @@ func (s *service) search(parent context.Context, userID, kbID uuid.UUID, request
 			ChunkID: hit.ID, DocumentID: hit.DocumentID, DocumentName: hit.DocumentName, FileType: hit.FileType,
 			Position: hit.Position, Section: rag.HeadingPath(hit.Meta), Content: hit.Content,
 			Score: hit.Score, VectorScore: hit.VectorScore, KeywordScore: hit.KeywordScore, Metadata: hit.Meta,
+			Matched: hit.Matched,
 		})
 	}
 	return &SearchResponse{
@@ -627,6 +625,7 @@ func (s *service) searchKnowledgeBases(ctx context.Context, userID uuid.UUID, kb
 	var all []rag.Hit
 	for _, key := range order {
 		group := groups[key]
+		hasParentChild := false
 		embedder, err := s.embedderFor(ctx, userID, group[0].EmbeddingModelProvider, group[0].EmbeddingModelName)
 		if err != nil {
 			return nil, err
@@ -635,6 +634,13 @@ func (s *service) searchKnowledgeBases(ctx context.Context, userID uuid.UUID, kb
 		groupOptions.Indexes = nil
 		for _, kb := range group {
 			groupOptions.Indexes = append(groupOptions.Indexes, kb.IndexName)
+			if effectiveChunkMode(kb) == model.ChunkModeParentChild {
+				hasParentChild = true
+			}
+		}
+		// 回填去重会让结果变少，parent_child 库先多取一些子块。
+		if hasParentChild {
+			groupOptions.TopK = min(max(options.TopK, 1)*s.rt.settings.ChildOverfetch, 50)
 		}
 		hits, err := rag.Search(ctx, client, embedder, groupOptions)
 		if err != nil {
@@ -642,6 +648,10 @@ func (s *service) searchKnowledgeBases(ctx context.Context, userID uuid.UUID, kb
 			return nil, biz.ErrVectorStoreUnavailable
 		}
 		all = append(all, hits...)
+	}
+	all, err = s.expandParents(ctx, all, kbIDs)
+	if err != nil {
+		return nil, err
 	}
 	sortHits(all)
 	topK := options.TopK
@@ -652,6 +662,47 @@ func (s *service) searchKnowledgeBases(ctx context.Context, userID uuid.UUID, kb
 		all = all[:topK]
 	}
 	return all, nil
+}
+
+// expandParents 把 parent_child 库的子块命中回填为父块。
+// parent_id 来自 ES 元数据，不能直接信任：父块必须属于本次检索的知识库范围，否则按未命中处理。
+func (s *service) expandParents(ctx context.Context, hits []rag.Hit, kbIDs []uuid.UUID) ([]rag.Hit, error) {
+	seen := map[uuid.UUID]struct{}{}
+	var ids []uuid.UUID
+	for _, hit := range hits {
+		pid := rag.ParentIDOf(hit)
+		if pid == "" {
+			continue
+		}
+		id, err := uuid.Parse(pid)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return hits, nil
+	}
+	allowed := make(map[uuid.UUID]struct{}, len(kbIDs))
+	for _, id := range kbIDs {
+		allowed[id] = struct{}{}
+	}
+	chunks, err := s.repo.getChunksByIDs(ctx, ids)
+	if err != nil {
+		logs.Errorf("load parent chunks: %v", err)
+		return nil, errs.DBError
+	}
+	parents := make(map[string]rag.ParentRef, len(chunks))
+	for _, chunk := range chunks {
+		if _, ok := allowed[chunk.KnowledgeBaseID]; !ok {
+			continue
+		}
+		parents[chunk.ID.String()] = rag.ParentRef{ID: chunk.ID.String(), Content: chunk.Content, Meta: chunk.MetaInfo}
+	}
+	return rag.CollapseToParents(hits, parents), nil
 }
 
 // embedderFor 通过事件拿厂商配置：knowledge 不直接依赖 agents 的仓储，与聊天模型同一条路径。
@@ -794,7 +845,7 @@ func toKnowledgeBaseResponse(kb *model.KnowledgeBase, totalSize int64) *Knowledg
 	return &KnowledgeBaseResponse{
 		ID: kb.ID, Name: kb.Name, Description: kb.Description,
 		EmbeddingModelProvider: kb.EmbeddingModelProvider, EmbeddingModelName: kb.EmbeddingModelName,
-		EmbeddingDimension: kb.EmbeddingDimension, StorageType: string(kb.StorageType), IndexName: kb.IndexName,
+		EmbeddingDimension: kb.EmbeddingDimension, StorageType: string(kb.StorageType), ChunkMode: string(effectiveChunkMode(kb)), IndexName: kb.IndexName,
 		DocumentCount: kb.DocumentCount, ChunkCount: kb.ChunkCount, TotalSize: totalSize, Tags: tags,
 		Status: string(kb.Status), CreatedAt: kb.CreatedAt, UpdatedAt: kb.UpdatedAt,
 	}
@@ -806,4 +857,100 @@ func toDocumentResponse(doc *model.Document, chunkCount int64) *DocumentResponse
 		Size: doc.Size, TokenCount: doc.TokenCount, ChunkCount: chunkCount, Status: string(doc.Status),
 		ErrorMessage: doc.ErrorMessage, Enabled: doc.Enabled, CreatedAt: doc.CreatedAt, UpdatedAt: doc.UpdatedAt,
 	}
+}
+
+// effectiveChunkMode 兜底：老数据或脏数据的空值按 flat 处理。
+func effectiveChunkMode(kb *model.KnowledgeBase) model.ChunkMode {
+	if kb.ChunkMode == model.ChunkModeParentChild {
+		return model.ChunkModeParentChild
+	}
+	return model.ChunkModeFlat
+}
+
+// builtChunks 切片结果：records 写 PG，store 写向量库。
+// flat 模式两者一一对应；parent_child 模式 records 是父块、store 是子块。
+type builtChunks struct {
+	records []*model.DocumentChunk
+	store   []rag.StoreChunk
+	tokens  int
+}
+
+func (s *service) documentMeta(kb *model.KnowledgeBase, records, stored int) model.JSON {
+	settings := s.rt.settings
+	if effectiveChunkMode(kb) == model.ChunkModeParentChild {
+		return model.JSON{
+			"chunkMode": string(model.ChunkModeParentChild), "parentChunkSize": settings.ParentChunkSize,
+			"childChunkSize": settings.ChildChunkSize, "childChunkOverlap": settings.ChildChunkOverlap,
+			"chunks": records, "childChunks": stored,
+		}
+	}
+	return model.JSON{"chunkSize": settings.ChunkSize, "chunkOverlap": settings.ChunkOverlap, "chunks": records}
+}
+
+// buildFlat 07 的切片逻辑：每片同时写 PG 与向量库，ID 相同。
+func (s *service) buildFlat(kb *model.KnowledgeBase, docID uuid.UUID, parsed *rag.ParseResult, title string) builtChunks {
+	settings := s.rt.settings
+	chunks := rag.Split(parsed, rag.SplitOptions{MaxRunes: settings.ChunkSize, Overlap: settings.ChunkOverlap, Title: title})
+	now := time.Now()
+	out := builtChunks{
+		records: make([]*model.DocumentChunk, 0, len(chunks)),
+		store:   make([]rag.StoreChunk, 0, len(chunks)),
+	}
+	for i, chunk := range chunks {
+		id := uuid.New()
+		tokens := estimateTokens(chunk.Raw)
+		out.tokens += tokens
+		out.records = append(out.records, &model.DocumentChunk{
+			BaseModel:       model.BaseModel{ID: id, CreatedAt: now, UpdatedAt: now},
+			DocumentID:      docID,
+			KnowledgeBaseID: kb.ID,
+			ElasticSearchID: id.String(),
+			ChunkIndex:      i,
+			Content:         chunk.Raw,
+			TokenCount:      tokens,
+			MetaInfo:        model.JSON(chunk.Meta),
+			Status:          model.ChunkStatusEmbedded,
+		})
+		out.store = append(out.store, rag.StoreChunk{ID: id.String(), Content: chunk.Content, Position: i, Meta: chunk.Meta})
+	}
+	return out
+}
+
+// buildParentChild 父块写 PG（回填用），子块写向量库（命中用），子块 metadata.parent_id 指向父块。
+func (s *service) buildParentChild(kb *model.KnowledgeBase, docID uuid.UUID, parsed *rag.ParseResult, title string) builtChunks {
+	settings := s.rt.settings
+	groups := rag.SplitParentChild(parsed, rag.ParentChildOptions{
+		ParentRunes: settings.ParentChunkSize, ChildRunes: settings.ChildChunkSize,
+		ChildOverlap: settings.ChildChunkOverlap, Title: title,
+	})
+	now := time.Now()
+	var out builtChunks
+	position := 0 // 子块在文档内的全局序号
+	for i, group := range groups {
+		parentID := uuid.New()
+		tokens := estimateTokens(group.Parent.Raw)
+		out.tokens += tokens
+		meta := rag.CloneMeta(group.Parent.Meta)
+		meta["child_count"] = len(group.Children)
+		out.records = append(out.records, &model.DocumentChunk{
+			BaseModel:       model.BaseModel{ID: parentID, CreatedAt: now, UpdatedAt: now},
+			DocumentID:      docID,
+			KnowledgeBaseID: kb.ID,
+			ElasticSearchID: "", // 父块不进向量库
+			ChunkIndex:      i,
+			Content:         group.Parent.Raw,
+			TokenCount:      tokens,
+			MetaInfo:        model.JSON(meta),
+			Status:          model.ChunkStatusEmbedded,
+		})
+		for _, child := range group.Children {
+			childMeta := rag.CloneMeta(child.Meta)
+			childMeta["parent_id"] = parentID.String()
+			out.store = append(out.store, rag.StoreChunk{
+				ID: uuid.New().String(), Content: child.Content, Position: position, Meta: childMeta,
+			})
+			position++
+		}
+	}
+	return out
 }

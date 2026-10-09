@@ -35,6 +35,7 @@ type repository interface {
 
 	replaceChunks(ctx context.Context, docID uuid.UUID, chunks []*model.DocumentChunk) error
 	listChunks(ctx context.Context, docID uuid.UUID) ([]*model.DocumentChunk, error)
+	getChunksByIDs(ctx context.Context, ids []uuid.UUID) ([]*model.DocumentChunk, error)
 }
 
 type models struct {
@@ -253,4 +254,14 @@ func (m *models) listChunks(ctx context.Context, docID uuid.UUID) ([]*model.Docu
 	var chunks []*model.DocumentChunk
 	err := m.db.WithContext(ctx).Where("document_id = ?", docID).Order("chunk_index ASC").Find(&chunks).Error
 	return chunks, err
+}
+
+// getChunksByIDs 按主键批量取切片（父块回填用）。
+func (m *models) getChunksByIDs(ctx context.Context, ids []uuid.UUID) ([]*model.DocumentChunk, error) {
+	var items []*model.DocumentChunk
+	if len(ids) == 0 {
+		return items, nil
+	}
+	err := m.db.WithContext(ctx).Where("id IN ?", ids).Find(&items).Error
+	return items, err
 }

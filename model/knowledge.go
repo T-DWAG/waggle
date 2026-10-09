@@ -43,6 +43,14 @@ const (
 	StorageTypeElasticSearch StorageType = "es"
 )
 
+// ChunkMode 切片模式：flat 每片一条；parent_child 子块进向量库、父块存 PG 回填。
+type ChunkMode string
+
+const (
+	ChunkModeFlat        ChunkMode = "flat"
+	ChunkModeParentChild ChunkMode = "parent_child"
+)
+
 type KnowledgeBaseStatus string
 
 const (
@@ -64,6 +72,7 @@ type KnowledgeBase struct {
 	EmbeddingDimension     int                 `json:"embeddingDimension" gorm:"column:embedding_dimension;type:integer;not null"`
 	StorageType            StorageType         `json:"storageType" gorm:"column:storage_type;type:varchar(50);not null;default:'es'"`
 	StorageConfig          JSON                `json:"storageConfig" gorm:"column:storage_config;type:jsonb"`
+	ChunkMode              ChunkMode           `json:"chunkMode" gorm:"column:chunk_mode;type:varchar(20);not null;default:'flat'"`
 	IndexName              string              `json:"indexName" gorm:"column:index_name;type:varchar(100);not null;unique"`
 	DocumentCount          uint                `json:"documentCount" gorm:"column:document_count;type:integer;not null;default:0"`
 	ChunkCount             uint                `json:"chunkCount" gorm:"column:chunk_count;type:integer;not null;default:0"`

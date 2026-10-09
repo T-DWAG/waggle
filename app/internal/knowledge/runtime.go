@@ -20,6 +20,10 @@ type settings struct {
 	MaxFileSize        int64
 	ChunkSize          int
 	ChunkOverlap       int
+	ParentChunkSize    int
+	ChildChunkSize     int
+	ChildChunkOverlap  int
+	ChildOverfetch     int
 	EmbeddingBatchSize int
 	TopK               int
 	MinScore           float64
@@ -35,6 +39,10 @@ func loadSettings() settings {
 		MaxFileSize:        int64(config.GetInt("knowledge.maxFileSizeMB")) << 20,
 		ChunkSize:          config.GetInt("knowledge.chunkSize"),
 		ChunkOverlap:       config.GetInt("knowledge.chunkOverlap"),
+		ParentChunkSize:    config.GetInt("knowledge.parentChunkSize"),
+		ChildChunkSize:     config.GetInt("knowledge.childChunkSize"),
+		ChildChunkOverlap:  config.GetInt("knowledge.childChunkOverlap"),
+		ChildOverfetch:     config.GetInt("knowledge.childOverfetch"),
 		EmbeddingBatchSize: config.GetInt("knowledge.embeddingBatchSize"),
 		TopK:               config.GetInt("knowledge.topK"),
 		MinScore:           config.GetFloat64("knowledge.minScore"),
@@ -51,6 +59,18 @@ func loadSettings() settings {
 	}
 	if s.ChunkSize <= 0 {
 		s.ChunkSize = 800
+	}
+	if s.ParentChunkSize <= 0 {
+		s.ParentChunkSize = 1200
+	}
+	if s.ChildChunkSize <= 0 {
+		s.ChildChunkSize = 300
+	}
+	if s.ChildChunkOverlap <= 0 {
+		s.ChildChunkOverlap = 40
+	}
+	if s.ChildOverfetch <= 0 {
+		s.ChildOverfetch = 3
 	}
 	if s.EmbeddingBatchSize <= 0 {
 		s.EmbeddingBatchSize = 16
